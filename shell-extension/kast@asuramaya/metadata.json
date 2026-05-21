@@ -1,9 +1,9 @@
 {
   "uuid": "kast@asuramaya",
   "name": "Kast",
-  "description": "Top bar controls for Ubuntu casting and AirPlay receiver state.",
+  "description": "Cast (Chromecast/Miracast) and AirPlay receiver controls as native GNOME Quick Settings tiles.",
   "shell-version": ["49"],
   "session-modes": ["user"],
-  "url": "https://example.com/kast",
-  "version": 1
+  "url": "https://github.com/asuramaya/kast",
+  "version": 2
 }

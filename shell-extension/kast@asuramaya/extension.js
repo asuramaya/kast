@@ -1,270 +1,250 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
-import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const CLI_PATH = `${GLib.get_home_dir()}/.local/bin/kast`;
 
-const KastIndicator = GObject.registerClass(
-class KastIndicator extends PanelMenu.Button {
-    _init() {
-        super._init(0.0, 'Kast');
+function runKast(args) {
+    try {
+        Gio.Subprocess.new([CLI_PATH, ...args], Gio.SubprocessFlags.NONE);
+    } catch (error) {
+        logError(error, 'kast: command failed');
+    }
+}
 
-        this._icon = new St.Icon({
-            icon_name: 'video-display-symbolic',
-            style_class: 'system-status-icon',
+function readKastJson(args, onDone) {
+    try {
+        const proc = Gio.Subprocess.new(
+            [CLI_PATH, ...args],
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+        proc.communicate_utf8_async(null, null, (p, res) => {
+            try {
+                const [, stdout] = p.communicate_utf8_finish(res);
+                onDone(JSON.parse(stdout));
+            } catch (error) {
+                logError(error, 'kast: JSON parse failed');
+            }
         });
-        this.add_child(this._icon);
+    } catch (error) {
+        logError(error, 'kast: subprocess failed');
+    }
+}
 
-        this._dynamicItems = [];
+function dimItem(text) {
+    return new PopupMenu.PopupMenuItem(text, {reactive: false, can_focus: false});
+}
+
+// "Cast" tile — outbound display casting (Chromecast + Miracast).
+const CastToggle = GObject.registerClass(
+class CastToggle extends QuickMenuToggle {
+    _init() {
+        super._init({
+            title: 'Cast',
+            subtitle: 'to a display',
+            iconName: 'video-display-symbolic',
+            toggleMode: false,
+        });
+        this.menu.setHeader('video-display-symbolic', 'Cast', 'Wireless display');
+
+        // Callbacks wired up by the indicator.
+        this.onRescanCast = null;
+        this.onScanMiracast = null;
+
+        const actions = new PopupMenu.PopupMenuSection();
+        actions.addAction('Display Cast…', () => runKast(['open-display-cast']));
+        actions.addAction('Miracast (drops Wi-Fi)…', () => runKast(['open-display-cast', '--drop-wifi']));
+        this.menu.addMenuItem(actions);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // Rebuilt on each discovery.
+        this._targets = new PopupMenu.PopupMenuSection();
+        this.menu.addMenuItem(this._targets);
+
+        // Clicking the pill body opens the cast picker.
+        this.connect('clicked', () => runKast(['open-display-cast']));
+    }
+
+    updateTargets(castTargets, miracastTargets, scanning) {
+        const total = castTargets.length + miracastTargets.length;
+        this.subtitle = total > 0 ? `${total} device${total === 1 ? '' : 's'} found` : 'to a display';
+
+        const s = this._targets;
+        s.removeAll();
+
+        s.addMenuItem(dimItem(`Chromecast (${castTargets.length})`));
+        if (castTargets.length === 0) {
+            s.addMenuItem(dimItem('No targets found'));
+        } else {
+            for (const t of castTargets)
+                s.addAction(t.name || t.address || 'Unknown device', () => runKast(['open-display-cast']));
+        }
+        s.addAction('Rescan Chromecast', () => this.onRescanCast?.());
+
+        s.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        s.addMenuItem(dimItem(`Miracast (${miracastTargets.length})`));
+        for (const t of miracastTargets)
+            s.addAction(t.name || t.hwaddr || 'Unknown display', () => runKast(['open-display-cast', '--drop-wifi']));
+        if (scanning)
+            s.addMenuItem(dimItem('Scanning for Miracast displays…'));
+        else
+            s.addAction('Scan for Miracast displays', () => this.onScanMiracast?.());
+    }
+});
+
+// "Receiver" tile — inbound AirPlay receiver; the pill toggles it on/off.
+const ReceiverToggle = GObject.registerClass(
+class ReceiverToggle extends QuickMenuToggle {
+    _init() {
+        super._init({
+            title: 'Receiver',
+            subtitle: 'AirPlay',
+            iconName: 'computer-symbolic',
+            toggleMode: true,
+        });
+        this.menu.setHeader('computer-symbolic', 'AirPlay Receiver', 'Receive screen + audio');
+
+        this._dynamic = new PopupMenu.PopupMenuSection();
+        this.menu.addMenuItem(this._dynamic);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        const fixed = new PopupMenu.PopupMenuSection();
+        fixed.addAction('Restart Receiver', () => runKast(['receiver-restart']));
+        fixed.addAction('Sound Settings…', () => runKast(['open-sound']));
+        this.menu.addMenuItem(fixed);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._footer = new PopupMenu.PopupMenuSection();
+        this.menu.addMenuItem(this._footer);
+
+        // Pill click toggles the receiver.
+        this.connect('clicked', () => runKast(['toggle-receiver']));
+    }
+
+    update(status, updateInfo) {
+        const active = !!status.receiver?.active;
+        const mode = status.mirror_mode ?? 'mirror';
+        this.checked = active;
+        this.subtitle = active ? `On · ${mode}` : 'Off';
+
+        const s = this._dynamic;
+        s.removeAll();
+        s.addMenuItem(dimItem('Mode'));
+        for (const [label, value] of [['Mirror', 'mirror'], ['Video Overlay', 'video-overlay']])
+            s.addAction(`${mode === value ? '●  ' : '    '}${label}`, () => runKast(['set-mode', value]));
+
+        s.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        s.addMenuItem(dimItem('AirPlay Output'));
+        const sinks = (status.outbound?.sinks ?? []).filter(sink => sink.raop);
+        if (sinks.length === 0)
+            s.addMenuItem(dimItem('No AirPlay outputs'));
+        else
+            for (const sink of sinks)
+                s.addAction(`${sink.default ? '●  ' : '    '}${sink.name}`, () => runKast(['select-sink', `${sink.id}`]));
+        s.addAction('Use Local Speakers', () => runKast(['select-local']));
+
+        const f = this._footer;
+        f.removeAll();
+        if (updateInfo && updateInfo.update_available)
+            f.addAction(`⬆ Update to v${updateInfo.latest}`, () => runKast(['update']));
+        f.addMenuItem(dimItem(`kast v${status.version ?? '?'}`));
+    }
+});
+
+const KastIndicator = GObject.registerClass(
+class KastIndicator extends SystemIndicator {
+    _init() {
+        super._init();
+
+        this._status = null;
         this._castTargets = [];
         this._miracastTargets = [];
         this._miracastScanning = false;
         this._updateInfo = null;
-        this._statusItem = new PopupMenu.PopupMenuItem('Loading cast status…', {
-            reactive: false,
-            can_focus: false,
-        });
-        this.menu.addMenuItem(this._statusItem);
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        this.menu.addAction('Display Cast…', () => this._spawn([CLI_PATH, 'open-display-cast']));
-        this.menu.addAction('Display Cast — Miracast (drops Wi-Fi)…', () => this._spawn([CLI_PATH, 'open-display-cast', '--drop-wifi']));
-        this.menu.addAction('Sound Settings…', () => this._spawn([CLI_PATH, 'open-sound']));
-        this.menu.addAction('Start Receiver', () => this._spawn([CLI_PATH, 'receiver-start']));
-        this.menu.addAction('Stop Receiver', () => this._spawn([CLI_PATH, 'receiver-stop']));
-        this.menu.addAction('Use Local Speakers', () => this._spawn([CLI_PATH, 'select-local']));
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        this._airplayHeading = new PopupMenu.PopupMenuItem('AirPlay Outputs', {
-            reactive: false,
-            can_focus: false,
-        });
-        this.menu.addMenuItem(this._airplayHeading);
-        this._refreshItem = new PopupMenu.PopupMenuItem('Refresh');
-        this._refreshItem.connect('activate', () => this._refresh());
-        this.menu.addMenuItem(this._refreshItem);
+        this._cast = new CastToggle();
+        this._receiver = new ReceiverToggle();
+        this._cast.onRescanCast = () => this._discoverCastTargets();
+        this._cast.onScanMiracast = () => this._scanMiracast();
+        this.quickSettingsItems.push(this._cast);
+        this.quickSettingsItems.push(this._receiver);
 
         this._refresh();
-        this._timerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, () => {
+        this._statusTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, () => {
             this._refresh();
             return GLib.SOURCE_CONTINUE;
         });
-        // mDNS discovery runs on its own slower cadence and never blocks status.
         this._discoverCastTargets();
-        this._castTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 20, () => this._discoverCastTargets());
-        // Update checks hit the network; keep them infrequent.
+        this._castTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 20, () => this._discoverCastTargets());
         this._checkUpdate();
-        this._updateTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 6 * 3600, () => this._checkUpdate());
-    }
-
-    destroy() {
-        if (this._timerId) {
-            GLib.source_remove(this._timerId);
-            this._timerId = 0;
-        }
-        if (this._castTimerId) {
-            GLib.source_remove(this._castTimerId);
-            this._castTimerId = 0;
-        }
-        if (this._updateTimerId) {
-            GLib.source_remove(this._updateTimerId);
-            this._updateTimerId = 0;
-        }
-        super.destroy();
-    }
-
-    _spawn(argv) {
-        try {
-            Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE);
-        } catch (error) {
-            logError(error, 'Kast command failed');
-        }
-    }
-
-    _readJson(argv, onDone) {
-        try {
-            const proc = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
-            proc.communicate_utf8_async(null, null, (subprocess, result) => {
-                try {
-                    const [, stdout] = subprocess.communicate_utf8_finish(result);
-                    onDone(JSON.parse(stdout));
-                } catch (error) {
-                    logError(error, 'Kast JSON parse failed');
-                }
-            });
-        } catch (error) {
-            logError(error, 'Kast subprocess failed');
-        }
-    }
-
-    _clearDynamicItems() {
-        for (const item of this._dynamicItems) {
-            item.destroy();
-        }
-        this._dynamicItems = [];
-    }
-
-    _addDynamic(item) {
-        this.menu.addMenuItem(item, this.menu._getMenuItems().indexOf(this._refreshItem));
-        this._dynamicItems.push(item);
-    }
-
-    _discoverCastTargets() {
-        this._readJson([CLI_PATH, 'cast-targets', '--json'], targets => {
-            if (Array.isArray(targets)) {
-                this._castTargets = targets;
-                this._refresh();
-            }
-        });
-        return GLib.SOURCE_CONTINUE;
-    }
-
-    _renderCastTargets() {
-        const heading = new PopupMenu.PopupMenuItem(`Chromecast Targets (${this._castTargets.length})`, {
-            reactive: false,
-            can_focus: false,
-        });
-        this._addDynamic(heading);
-
-        if (this._castTargets.length === 0) {
-            this._addDynamic(new PopupMenu.PopupMenuItem('No cast targets found', {
-                reactive: false,
-                can_focus: false,
-            }));
-        } else {
-            for (const target of this._castTargets) {
-                const name = target.name || target.address || 'Unknown device';
-                const item = new PopupMenu.PopupMenuItem(name);
-                // gnome-network-displays owns the screencast pipeline and exposes
-                // no connect API, so selecting a target opens its picker.
-                item.connect('activate', () => this._spawn([CLI_PATH, 'open-display-cast']));
-                this._addDynamic(item);
-            }
-        }
-        const rescan = new PopupMenu.PopupMenuItem('Rescan Chromecast Targets');
-        rescan.connect('activate', () => this._discoverCastTargets());
-        this._addDynamic(rescan);
-    }
-
-    _scanMiracast() {
-        // On-demand only: a P2P find shares the Wi-Fi radio, so it is never run
-        // on a timer.
-        if (this._miracastScanning)
-            return;
-        this._miracastScanning = true;
-        this._refresh();
-        this._readJson([CLI_PATH, 'miracast-targets', '--json'], targets => {
-            this._miracastScanning = false;
-            if (Array.isArray(targets))
-                this._miracastTargets = targets;
-            this._refresh();
-        });
-    }
-
-    _renderMiracast() {
-        const heading = new PopupMenu.PopupMenuItem(`Miracast Displays (${this._miracastTargets.length})`, {
-            reactive: false,
-            can_focus: false,
-        });
-        this._addDynamic(heading);
-
-        for (const target of this._miracastTargets) {
-            const name = target.name || target.hwaddr || 'Unknown display';
-            const item = new PopupMenu.PopupMenuItem(name);
-            // Miracast needs the radio; hand off to gnd and drop Wi-Fi.
-            item.connect('activate', () => this._spawn([CLI_PATH, 'open-display-cast', '--drop-wifi']));
-            this._addDynamic(item);
-        }
-
-        if (this._miracastScanning) {
-            this._addDynamic(new PopupMenu.PopupMenuItem('Scanning for Miracast displays…', {
-                reactive: false,
-                can_focus: false,
-            }));
-        } else {
-            const scan = new PopupMenu.PopupMenuItem('Scan for Miracast displays');
-            scan.connect('activate', () => this._scanMiracast());
-            this._addDynamic(scan);
-        }
-    }
-
-    _checkUpdate() {
-        this._readJson([CLI_PATH, 'check-update', '--json'], info => {
-            if (info && typeof info === 'object') {
-                this._updateInfo = info;
-                this._refresh();
-            }
-        });
-        return GLib.SOURCE_CONTINUE;
-    }
-
-    _renderUpdate() {
-        if (!this._updateInfo || !this._updateInfo.update_available)
-            return;
-        const item = new PopupMenu.PopupMenuItem(`⬆ Update to v${this._updateInfo.latest}`);
-        // The extension runs in gnome-shell, so the installer's kast-tray restart
-        // won't interrupt this update.
-        item.connect('activate', () => this._spawn([CLI_PATH, 'update']));
-        this._addDynamic(item);
-    }
-
-    _renderMode(mode) {
-        this._addDynamic(new PopupMenu.PopupMenuItem('Receiver Mode', {reactive: false, can_focus: false}));
-        for (const [label, value] of [['Mirror', 'mirror'], ['Video Overlay', 'video-overlay']]) {
-            const item = new PopupMenu.PopupMenuItem(mode === value ? `● ${label}` : `    ${label}`);
-            item.connect('activate', () => this._spawn([CLI_PATH, 'set-mode', value]));
-            this._addDynamic(item);
-        }
+        this._updateTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 6 * 3600, () => this._checkUpdate());
     }
 
     _refresh() {
-        this._readJson([CLI_PATH, 'status', '--json'], status => {
-            const receiverState = status.receiver?.active ? 'receiver on' : 'receiver off';
-            const sinkCount = status.outbound?.airplay_sink_count ?? 0;
-            const mode = status.mirror_mode ?? 'mirror';
-            this._statusItem.label.text = `${receiverState} · mode: ${mode} · ${sinkCount} AirPlay · kast v${status.version ?? '?'}`;
-
-            this._clearDynamicItems();
-            const sinks = status.outbound?.sinks?.filter(sink => sink.raop) ?? [];
-
-            if (sinks.length === 0) {
-                this._addDynamic(new PopupMenu.PopupMenuItem('No AirPlay sinks discovered', {
-                    reactive: false,
-                    can_focus: false,
-                }));
-            } else {
-                for (const sink of sinks) {
-                    const label = sink.default ? `• ${sink.name}` : sink.name;
-                    const item = new PopupMenu.PopupMenuItem(label);
-                    item.connect('activate', () => this._spawn([CLI_PATH, 'select-sink', `${sink.id}`]));
-                    this._addDynamic(item);
-                }
-            }
-
-            this._renderCastTargets();
-            this._renderMiracast();
-            this._renderMode(mode);
-            this._renderUpdate();
+        readKastJson(['status', '--json'], status => {
+            this._status = status;
+            this._receiver.update(status, this._updateInfo);
+            this._cast.updateTargets(this._castTargets, this._miracastTargets, this._miracastScanning);
         });
+    }
+
+    _discoverCastTargets() {
+        readKastJson(['cast-targets', '--json'], targets => {
+            if (Array.isArray(targets)) {
+                this._castTargets = targets;
+                this._cast.updateTargets(this._castTargets, this._miracastTargets, this._miracastScanning);
+            }
+        });
+        return GLib.SOURCE_CONTINUE;
+    }
+
+    _scanMiracast() {
+        if (this._miracastScanning)
+            return;
+        this._miracastScanning = true;
+        this._cast.updateTargets(this._castTargets, this._miracastTargets, true);
+        readKastJson(['miracast-targets', '--json'], targets => {
+            this._miracastScanning = false;
+            if (Array.isArray(targets))
+                this._miracastTargets = targets;
+            this._cast.updateTargets(this._castTargets, this._miracastTargets, false);
+        });
+    }
+
+    _checkUpdate() {
+        readKastJson(['check-update', '--json'], info => {
+            if (info && typeof info === 'object') {
+                this._updateInfo = info;
+                if (this._status)
+                    this._receiver.update(this._status, info);
+            }
+        });
+        return GLib.SOURCE_CONTINUE;
+    }
+
+    destroy() {
+        for (const id of [this._statusTimer, this._castTimer, this._updateTimer]) {
+            if (id)
+                GLib.source_remove(id);
+        }
+        this._statusTimer = this._castTimer = this._updateTimer = 0;
+        this.quickSettingsItems.forEach(item => item.destroy());
+        super.destroy();
     }
 });
 
-export default class KastCastExtension extends Extension {
+export default class KastExtension extends Extension {
     enable() {
         this._indicator = new KastIndicator();
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
+        Main.panel.statusArea.quickSettings.addExternalIndicator(this._indicator);
     }
 
     disable() {
-        if (this._indicator) {
-            this._indicator.destroy();
-            this._indicator = null;
-        }
+        this._indicator?.destroy();
+        this._indicator = null;
     }
 }

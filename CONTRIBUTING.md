@@ -8,8 +8,7 @@ casting tools. Contributions that keep it simple and dependency-light are very w
 | Path | What |
 |------|------|
 | `scripts/kast` | the CLI (bash); the source of truth, run by every other piece |
-| `scripts/kast-tray.py` | AppIndicator tray (Python + GTK3) |
-| `shell-extension/kast@asuramaya/` | optional GNOME Shell panel UI (GJS) |
+| `shell-extension/kast@asuramaya/` | the UI — GNOME Quick Settings tiles (GJS) |
 | `install.sh` / `uninstall.sh` | user-scope (de)installer |
 | `systemd/user/`, `config/`, `applications/` | installed unit/config/desktop files |
 
@@ -29,18 +28,20 @@ Iterate on `scripts/kast` directly (`bash scripts/kast <cmd>`), then re-run
 
 ```bash
 shellcheck install.sh uninstall.sh scripts/kast      # reads .shellcheckrc
-python3 -m py_compile scripts/kast-tray.py
-python3 -m pyflakes scripts/kast-tray.py
 node --check shell-extension/kast@asuramaya/extension.js
 bash scripts/kast version && bash scripts/kast --help
 ```
+
+The extension can't be hot-reloaded on Wayland — test it by reinstalling
+(`./install.sh --skip-apt`) and logging out/in, or in a nested session with
+`dbus-run-session -- gnome-shell --nested --wayland`.
 
 ## Style
 
 - Bash: `set -euo pipefail`, keep it ShellCheck-clean (intentional exceptions live in
   `.shellcheckrc`). Quote expansions. Prefer small functions.
 - Keep new runtime dependencies out unless they already ship on Ubuntu 25.10.
-- The CLI is the integration point: tray and extension shell out to `kast … --json`.
+- The CLI is the integration point: the extension shells out to `kast … --json`.
 
 ## Releasing
 

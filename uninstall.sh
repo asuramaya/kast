@@ -37,7 +37,7 @@ stop_services() {
 }
 
 kill_tray() {
-    # The tray may run outside its unit (autostarted), so stop it directly too.
+    # Legacy AppIndicator tray may run outside its unit; stop it directly too.
     local p
     while read -r p; do
         [[ -n "${p}" ]] || continue
@@ -45,6 +45,11 @@ kill_tray() {
             kill "${p}" >/dev/null 2>&1 || true
         fi
     done < <(pgrep -x python3 2>/dev/null || true)
+}
+
+disable_extension() {
+    command -v gnome-extensions >/dev/null 2>&1 || return 0
+    gnome-extensions disable kast@asuramaya >/dev/null 2>&1 || true
 }
 
 remove_files() {
@@ -59,6 +64,7 @@ remove_files() {
           "${DATA_HOME}/applications/ctrlk-cast-center.desktop" \
           "${DATA_HOME}/applications/ctrlk-cast-tray.desktop"
     rm -rf "${DATA_HOME:?}/${APP_ID:?}" "${DATA_HOME:?}/ctrlk-cast"
+    rm -rf "${DATA_HOME:?}/gnome-shell/extensions/kast@asuramaya"
     rm -f "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
 }
 
@@ -97,6 +103,7 @@ remove_user_data() {
 note "Removing kast..."
 stop_services
 kill_tray
+disable_extension
 remove_files
 remove_shortcut
 remove_user_data

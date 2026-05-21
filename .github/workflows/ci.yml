@@ -17,12 +17,6 @@ jobs:
       - name: ShellCheck
         run: shellcheck install.sh uninstall.sh scripts/kast
 
-      - name: Python (compile + pyflakes)
-        run: |
-          python3 -m py_compile scripts/kast-tray.py
-          python3 -m pip install --quiet pyflakes
-          python3 -m pyflakes scripts/kast-tray.py
-
       - name: Shell extension (syntax)
         run: node --check "shell-extension/kast@asuramaya/extension.js"
 

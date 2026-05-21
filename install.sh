@@ -46,6 +46,9 @@ fi
 KAST_VERSION="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' "${ROOT_DIR}/scripts/kast" 2>/dev/null)"
 KAST_VERSION="${KAST_VERSION:-unknown}"
 
+EXT_UUID="kast@asuramaya"
+EXT_DIR="${DATA_HOME}/gnome-shell/extensions/${EXT_UUID}"
+
 usage() {
     cat <<'EOF'
 Usage: ./install.sh [--skip-apt] [--no-shortcut] [--shortcut '<Super>k']
@@ -87,30 +90,27 @@ install_user_files() {
     mkdir -p "${BIN_DIR}"
     install -D -m 644 "${ROOT_DIR}/config/pipewire/50-raop.conf" "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
     install -D -m 755 "${ROOT_DIR}/scripts/kast" "${BIN_DIR}/kast"
-    install -D -m 755 "${ROOT_DIR}/scripts/kast-tray.py" "${BIN_DIR}/kast-tray"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
         install -D -m 644 "${ROOT_DIR}/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi
     install -D -m 644 "${ROOT_DIR}/systemd/user/uxplay.service" "${CONFIG_HOME}/systemd/user/uxplay.service"
-    install -D -m 644 "${ROOT_DIR}/systemd/user/kast-tray.service" "${CONFIG_HOME}/systemd/user/kast-tray.service"
     install -D -m 644 "${ROOT_DIR}/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
-    cat >"${DATA_HOME}/applications/kast-tray.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Kast Tray
-Comment=Top bar controls for casting and AirPlay receiver state
-Exec=${BIN_DIR}/kast-tray
-Icon=video-display-symbolic
-Terminal=false
-Categories=AudioVideo;Network;GNOME;
-StartupNotify=false
-EOF
+    # GNOME Quick Settings extension — the primary UI.
+    install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/extension.js" "${EXT_DIR}/extension.js"
+    install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/metadata.json" "${EXT_DIR}/metadata.json"
+}
+
+remove_legacy_tray() {
+    # The AppIndicator tray was replaced by the Quick Settings extension.
+    systemctl --user disable --now kast-tray.service >/dev/null 2>&1 || true
+    pkill -f "${BIN_DIR}/kast-tray" >/dev/null 2>&1 || true
+    rm -f "${CONFIG_HOME}/systemd/user/kast-tray.service" \
+          "${BIN_DIR}/kast-tray" \
+          "${DATA_HOME}/applications/kast-tray.desktop"
 }
 
 enable_services() {
     systemctl --user daemon-reload
-    systemctl --user enable kast-tray.service
-    systemctl --user restart kast-tray.service
     if command -v uxplay >/dev/null 2>&1; then
         systemctl --user enable uxplay.service
         systemctl --user start uxplay.service
@@ -120,6 +120,14 @@ enable_services() {
         printf 'Skipping uxplay startup because the package is not installed.\n'
     fi
     systemctl --user restart pipewire.service pipewire-pulse.service wireplumber.service || true
+}
+
+enable_extension() {
+    if command -v gnome-extensions >/dev/null 2>&1; then
+        # Adds the uuid to the enabled list; it loads on the next login (Wayland
+        # cannot hot-reload shell extensions).
+        gnome-extensions enable "${EXT_UUID}" >/dev/null 2>&1 || true
+    fi
 }
 
 enable_desktop_integration() {
@@ -133,7 +141,9 @@ if [[ "${SKIP_APT}" -eq 0 ]]; then
 fi
 
 install_user_files
+remove_legacy_tray
 enable_services
+enable_extension
 enable_desktop_integration
 
 if ! grep -Fq "${BIN_DIR}" <<<":${PATH}:"; then
@@ -147,12 +157,15 @@ cat <<EOF
 
 Kast v${KAST_VERSION} installed.
 
-  - Tray:      look for the cast icon in the top bar (next to network/sound)
+  *** Log out and back in to load the Kast tiles in GNOME Quick Settings. ***
+      (Wayland can't hot-reload shell extensions.)
+
+  - UI:        Cast + Receiver tiles in the Quick Settings menu (top-right)
   - Shortcut:  press ${SHORTCUT_LABEL} to open display casting
   - Check it:  kast doctor
   - Cast:      kast open-display-cast        (Chromecast / LAN: keeps Wi-Fi)
                kast open-display-cast --drop-wifi   (Miracast)
-  - Discover:  kast cast-targets    kast miracast-targets
+  - Update:    kast update
   - Remove:    curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/uninstall.sh | bash
 EOF
 

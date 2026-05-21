@@ -3,6 +3,21 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-05-21
+
+### Changed
+- **The UI is now native GNOME Quick Settings tiles.** The shell extension was rebuilt on
+  the GNOME 49 QuickSettings API into a **Cast** tile (display picker + Chromecast/Miracast
+  discovery) and a **Receiver** toggle (on/off pill + mode + AirPlay output + version/update),
+  appearing in the system menu next to Wi-Fi/Bluetooth.
+- `install.sh` now installs and enables the extension (and removes the old tray). Log out and
+  back in to load it — Wayland can't hot-reload shell extensions.
+
+### Removed
+- The AppIndicator tray (`scripts/kast-tray.py`, `kast-tray.service`) and its dependencies
+  (`python3-gi`, `gir1.2-ayatanaappindicator3-0.1`, `gir1.2-gtk-3.0`), replaced by the
+  Quick Settings extension.
+
 ## [0.1.2] - 2026-05-21
 
 ### Added
@@ -52,6 +67,7 @@ Initial release. A Win+K-style cast panel for GNOME on Ubuntu 25.10.
 - `gnome-network-displays` exposes no connect API, so kast discovers and lists cast
   targets but hands off to its picker to complete the connection.
 
+[0.1.3]: https://github.com/asuramaya/kast/releases/tag/v0.1.3
 [0.1.2]: https://github.com/asuramaya/kast/releases/tag/v0.1.2
 [0.1.1]: https://github.com/asuramaya/kast/releases/tag/v0.1.1
 [0.1.0]: https://github.com/asuramaya/kast/releases/tag/v0.1.0

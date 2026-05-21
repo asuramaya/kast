@@ -14,7 +14,5 @@ gnome-network-displays
 # Inbound AirPlay receiver
 uxplay
 
-# Tray integration and local control helpers
-python3-gi
-gir1.2-ayatanaappindicator3-0.1
-gir1.2-gtk-3.0
+# The UI is a GNOME Quick Settings extension (GJS, ships with gnome-shell) —
+# no extra packages needed.

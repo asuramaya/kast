@@ -40,7 +40,7 @@ body:
     id: logs
     attributes:
       label: Relevant logs
-      description: e.g. `journalctl --user -u kast-tray.service -u uxplay.service -n 50`
+      description: e.g. `journalctl --user -u uxplay.service -n 50` or shell logs `journalctl --user -b 0 /usr/bin/gnome-shell | grep -i kast`
       render: text
     validations:
       required: false
