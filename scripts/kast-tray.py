@@ -22,6 +22,8 @@ REFRESH_SEC = 6
 # mDNS discovery is slower and out-of-band, so it runs on its own cadence and
 # never blocks the status refresh that rebuilds the menu.
 CAST_DISCOVERY_SEC = 20
+# Update checks hit the network; keep them infrequent.
+UPDATE_CHECK_SEC = 6 * 3600
 
 
 class KastCastTray:
@@ -37,10 +39,13 @@ class KastCastTray:
         self._cast_targets: list[dict] = []
         self._miracast_targets: list[dict] = []
         self._miracast_scanning = False
+        self._update_info: dict | None = None
         self._refresh()
         GLib.timeout_add_seconds(REFRESH_SEC, self._periodic_refresh)
         self._discover_cast_targets()
         GLib.timeout_add_seconds(CAST_DISCOVERY_SEC, self._discover_cast_targets)
+        self._check_update()
+        GLib.timeout_add_seconds(UPDATE_CHECK_SEC, self._check_update)
 
     def _periodic_refresh(self) -> bool:
         self._refresh()
@@ -96,6 +101,36 @@ class KastCastTray:
         except Exception:
             pass
         self._refresh()
+
+    def _check_update(self) -> bool:
+        try:
+            proc = Gio.Subprocess.new(
+                [CLI, "check-update", "--json"],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+            )
+            proc.communicate_utf8_async(None, None, self._on_update_info)
+        except Exception:
+            pass
+        return GLib.SOURCE_CONTINUE
+
+    def _on_update_info(self, proc: Gio.Subprocess, result: Gio.AsyncResult) -> None:
+        try:
+            _ok, stdout, _stderr = proc.communicate_utf8_finish(result)
+            info = json.loads(stdout) if stdout else None
+            if isinstance(info, dict):
+                self._update_info = info
+                self._refresh()
+        except Exception:
+            pass
+
+    def _run_update(self) -> None:
+        # Run inside a transient systemd scope so the update survives the
+        # kast-tray.service restart that the installer performs mid-update.
+        argv = ["systemd-run", "--user", "--scope", "--quiet", CLI, "update"]
+        try:
+            subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception:
+            subprocess.Popen([CLI, "update"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
     def _spawn(self, *args: str) -> None:
         try:
@@ -248,19 +283,32 @@ class KastCastTray:
         item.connect("activate", lambda *_args: self._spawn("receiver-restart"))
         menu.append(item)
 
-        item = Gtk.MenuItem(label="Receiver Mode: Mirror")
-        item.connect("activate", lambda *_args: self._spawn("set-mode", "mirror"))
-        menu.append(item)
-
-        item = Gtk.MenuItem(label="Receiver Mode: Video Overlay")
-        item.connect("activate", lambda *_args: self._spawn("set-mode", "video-overlay"))
-        menu.append(item)
+        mode = status.get("mirror_mode", "mirror")
+        mirror_mode_item = Gtk.RadioMenuItem(label="Mode: Mirror")
+        overlay_mode_item = Gtk.RadioMenuItem(label="Mode: Video Overlay")
+        overlay_mode_item.join_group(mirror_mode_item)
+        (mirror_mode_item if mode == "mirror" else overlay_mode_item).set_active(True)
+        # Connect AFTER set_active so the programmatic selection above doesn't
+        # fire a spurious set-mode (which would restart the receiver).
+        mirror_mode_item.connect("toggled", lambda w: self._spawn("set-mode", "mirror") if w.get_active() else None)
+        overlay_mode_item.connect("toggled", lambda w: self._spawn("set-mode", "video-overlay") if w.get_active() else None)
+        menu.append(mirror_mode_item)
+        menu.append(overlay_mode_item)
 
         menu.append(Gtk.SeparatorMenuItem())
+
+        if self._update_info and self._update_info.get("update_available"):
+            update_item = Gtk.MenuItem(label=f"⬆ Update to v{self._update_info.get('latest')}")
+            update_item.connect("activate", lambda *_args: self._run_update())
+            menu.append(update_item)
 
         refresh = Gtk.MenuItem(label="Refresh")
         refresh.connect("activate", lambda *_args: self._refresh())
         menu.append(refresh)
+
+        version_item = Gtk.MenuItem(label=f"kast v{status.get('version', '?')}")
+        version_item.set_sensitive(False)
+        menu.append(version_item)
 
         quit_item = Gtk.MenuItem(label="Quit Tray")
         quit_item.connect("activate", lambda *_args: Gtk.main_quit())

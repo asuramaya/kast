@@ -57,6 +57,16 @@ After installing, run `kast doctor` to confirm the stack is healthy.
 5. Installs a top-bar tray controller and autostarts it at login.
 6. Adds a GNOME app launcher and a default `Super+K` shortcut.
 
+## Updating
+
+```bash
+kast check-update    # is a newer release available?
+kast update          # update in place from the latest GitHub release
+```
+
+The tray and shell extension also check periodically and surface an "⬆ Update to vX.Y.Z"
+entry when one is available — clicking it runs the update for you.
+
 ## Uninstall
 
 ```bash

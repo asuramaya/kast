@@ -3,6 +3,22 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-05-21
+
+### Added
+- `kast check-update` and `kast update` — compare against the latest GitHub release and
+  update in place (`update` re-runs the installer for the newest release).
+- `kast status --json` now includes the running `version`.
+- Tray: receiver-mode **radio items** (the active mode is checked), an "⬆ Update to vX.Y.Z"
+  entry when an update is available, and a footer showing the installed version.
+- Shell extension brought to tray parity: version + current mode in the status line, an
+  update notice + action, receiver-mode toggle, and a "Rescan Chromecast Targets" action.
+
+### Changed
+- Tray and extension present the receiver mode as a single selectable control instead of
+  two separate "set mode" actions; the redundant "Toggle Receiver" item was removed from
+  the extension.
+
 ## [0.1.1] - 2026-05-21
 
 ### Added
@@ -36,5 +52,6 @@ Initial release. A Win+K-style cast panel for GNOME on Ubuntu 25.10.
 - `gnome-network-displays` exposes no connect API, so kast discovers and lists cast
   targets but hands off to its picker to complete the connection.
 
+[0.1.2]: https://github.com/asuramaya/kast/releases/tag/v0.1.2
 [0.1.1]: https://github.com/asuramaya/kast/releases/tag/v0.1.1
 [0.1.0]: https://github.com/asuramaya/kast/releases/tag/v0.1.0

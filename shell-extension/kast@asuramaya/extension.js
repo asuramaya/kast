@@ -25,6 +25,7 @@ class KastIndicator extends PanelMenu.Button {
         this._castTargets = [];
         this._miracastTargets = [];
         this._miracastScanning = false;
+        this._updateInfo = null;
         this._statusItem = new PopupMenu.PopupMenuItem('Loading cast status…', {
             reactive: false,
             can_focus: false,
@@ -37,7 +38,6 @@ class KastIndicator extends PanelMenu.Button {
         this.menu.addAction('Sound Settings…', () => this._spawn([CLI_PATH, 'open-sound']));
         this.menu.addAction('Start Receiver', () => this._spawn([CLI_PATH, 'receiver-start']));
         this.menu.addAction('Stop Receiver', () => this._spawn([CLI_PATH, 'receiver-stop']));
-        this.menu.addAction('Toggle Receiver', () => this._spawn([CLI_PATH, 'toggle-receiver']));
         this.menu.addAction('Use Local Speakers', () => this._spawn([CLI_PATH, 'select-local']));
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
@@ -58,6 +58,9 @@ class KastIndicator extends PanelMenu.Button {
         // mDNS discovery runs on its own slower cadence and never blocks status.
         this._discoverCastTargets();
         this._castTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 20, () => this._discoverCastTargets());
+        // Update checks hit the network; keep them infrequent.
+        this._checkUpdate();
+        this._updateTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 6 * 3600, () => this._checkUpdate());
     }
 
     destroy() {
@@ -68,6 +71,10 @@ class KastIndicator extends PanelMenu.Button {
         if (this._castTimerId) {
             GLib.source_remove(this._castTimerId);
             this._castTimerId = 0;
+        }
+        if (this._updateTimerId) {
+            GLib.source_remove(this._updateTimerId);
+            this._updateTimerId = 0;
         }
         super.destroy();
     }
@@ -140,6 +147,9 @@ class KastIndicator extends PanelMenu.Button {
                 this._addDynamic(item);
             }
         }
+        const rescan = new PopupMenu.PopupMenuItem('Rescan Chromecast Targets');
+        rescan.connect('activate', () => this._discoverCastTargets());
+        this._addDynamic(rescan);
     }
 
     _scanMiracast() {
@@ -184,11 +194,41 @@ class KastIndicator extends PanelMenu.Button {
         }
     }
 
+    _checkUpdate() {
+        this._readJson([CLI_PATH, 'check-update', '--json'], info => {
+            if (info && typeof info === 'object') {
+                this._updateInfo = info;
+                this._refresh();
+            }
+        });
+        return GLib.SOURCE_CONTINUE;
+    }
+
+    _renderUpdate() {
+        if (!this._updateInfo || !this._updateInfo.update_available)
+            return;
+        const item = new PopupMenu.PopupMenuItem(`⬆ Update to v${this._updateInfo.latest}`);
+        // The extension runs in gnome-shell, so the installer's kast-tray restart
+        // won't interrupt this update.
+        item.connect('activate', () => this._spawn([CLI_PATH, 'update']));
+        this._addDynamic(item);
+    }
+
+    _renderMode(mode) {
+        this._addDynamic(new PopupMenu.PopupMenuItem('Receiver Mode', {reactive: false, can_focus: false}));
+        for (const [label, value] of [['Mirror', 'mirror'], ['Video Overlay', 'video-overlay']]) {
+            const item = new PopupMenu.PopupMenuItem(mode === value ? `● ${label}` : `    ${label}`);
+            item.connect('activate', () => this._spawn([CLI_PATH, 'set-mode', value]));
+            this._addDynamic(item);
+        }
+    }
+
     _refresh() {
         this._readJson([CLI_PATH, 'status', '--json'], status => {
             const receiverState = status.receiver?.active ? 'receiver on' : 'receiver off';
             const sinkCount = status.outbound?.airplay_sink_count ?? 0;
-            this._statusItem.label.text = `${receiverState} · ${sinkCount} AirPlay sink${sinkCount === 1 ? '' : 's'}`;
+            const mode = status.mirror_mode ?? 'mirror';
+            this._statusItem.label.text = `${receiverState} · mode: ${mode} · ${sinkCount} AirPlay · kast v${status.version ?? '?'}`;
 
             this._clearDynamicItems();
             const sinks = status.outbound?.sinks?.filter(sink => sink.raop) ?? [];
@@ -209,6 +249,8 @@ class KastIndicator extends PanelMenu.Button {
 
             this._renderCastTargets();
             this._renderMiracast();
+            this._renderMode(mode);
+            this._renderUpdate();
         });
     }
 });

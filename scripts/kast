@@ -2,7 +2,8 @@
 set -euo pipefail
 
 APP_ID="kast"
-KAST_VERSION="0.1.1"
+KAST_VERSION="0.1.2"
+REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 CONF_FILE="${CONFIG_HOME}/${APP_ID}/uxplay.conf"
@@ -188,6 +189,7 @@ status_json() {
     fi
 
     jq -n \
+        --arg version "${KAST_VERSION}" \
         --arg receiver_name "${UXPLAY_NAME}" \
         --arg receiver_active "${receiver_active}" \
         --arg receiver_enabled "${receiver_enabled}" \
@@ -196,6 +198,7 @@ status_json() {
         --arg mirror_mode "$(get_mode)" \
         --argjson sinks "${sinks_json}" \
         '{
+            version: $version,
             receiver: {
                 name: $receiver_name,
                 active: ($receiver_active == "true"),
@@ -496,6 +499,55 @@ doctor_run() {
     [[ "${DOCTOR_FAIL}" -eq 0 ]]
 }
 
+latest_release_version() {
+    need curl
+    curl -fsSL "https://api.github.com/repos/${REPO_SLUG}/releases/latest" 2>/dev/null \
+        | jq -r '.tag_name // empty' 2>/dev/null | sed 's/^v//'
+}
+
+version_gt() {
+    # True only when $1 is a strictly newer version than $2.
+    [[ "$1" != "$2" ]] && [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" == "$1" ]]
+}
+
+check_update_json() {
+    need jq
+    local latest avail
+    latest="$(latest_release_version)"
+    if [[ -n "${latest}" ]] && version_gt "${latest}" "${KAST_VERSION}"; then
+        avail=true
+    else
+        avail=false
+    fi
+    jq -n --arg current "${KAST_VERSION}" --arg latest "${latest}" --argjson avail "${avail}" \
+        '{current: $current, latest: (if $latest == "" then null else $latest end), update_available: $avail}'
+}
+
+check_update_text() {
+    local json avail latest
+    json="$(check_update_json)"
+    avail="$(jq -r '.update_available' <<<"${json}")"
+    latest="$(jq -r '.latest // "unknown"' <<<"${json}")"
+    if [[ "${avail}" == "true" ]]; then
+        printf 'Update available: v%s -> v%s   (run: kast update)\n' "${KAST_VERSION}" "${latest}"
+    else
+        printf 'kast is up to date (v%s; latest v%s)\n' "${KAST_VERSION}" "${latest}"
+    fi
+}
+
+update_run() {
+    need curl
+    local latest
+    latest="$(latest_release_version)"
+    [[ -n "${latest}" ]] || die "Could not reach GitHub to check for updates"
+    if ! version_gt "${latest}" "${KAST_VERSION}"; then
+        printf 'kast is already up to date (v%s)\n' "${KAST_VERSION}"
+        return 0
+    fi
+    printf 'Updating kast v%s -> v%s ...\n' "${KAST_VERSION}" "${latest}"
+    curl -fsSL "https://raw.githubusercontent.com/${REPO_SLUG}/main/install.sh" | bash -s -- --skip-apt
+}
+
 usage() {
     cat <<'EOF'
 Usage:
@@ -520,6 +572,8 @@ Usage:
   kast toggle-receiver
   kast install-shortcut [binding]
   kast doctor
+  kast check-update [--json]
+  kast update
   kast version
 EOF
 }
@@ -612,6 +666,12 @@ case "${cmd}" in
         ;;
     doctor)
         doctor_run
+        ;;
+    check-update)
+        if [[ "${1:-}" == "--json" ]]; then check_update_json; else check_update_text; fi
+        ;;
+    update)
+        update_run
         ;;
     version|--version|-v)
         printf 'kast %s\n' "${KAST_VERSION}"
