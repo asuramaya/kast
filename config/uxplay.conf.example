@@ -1,0 +1,11 @@
+# shellcheck shell=bash
+
+# Name advertised to iPhone, iPad, and macOS clients.
+UXPLAY_NAME="Kast Receiver"
+
+# Extra arguments forwarded to uxplay.
+# Examples:
+# UXPLAY_ARGS=(-h265)
+# UXPLAY_ARGS=(-pin 2468)
+# UXPLAY_ARGS=(-h265 -pin 2468)
+UXPLAY_ARGS=()

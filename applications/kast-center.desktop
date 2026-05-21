@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Kast Display Cast
+Comment=Launch the Ubuntu display casting UI
+Exec=gnome-network-displays
+Icon=video-display-symbolic
+Terminal=false
+Categories=AudioVideo;Network;GNOME;
+StartupNotify=true

@@ -1,0 +1,625 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_ID="kast"
+KAST_VERSION="0.1.0"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+CONF_FILE="${CONFIG_HOME}/${APP_ID}/uxplay.conf"
+MODE_FILE="${STATE_HOME}/${APP_ID}/display-mode"
+WIFI_STATE_FILE="${STATE_HOME}/${APP_ID}/wifi-connection"
+
+die() {
+    printf '%s\n' "$*" >&2
+    exit 1
+}
+
+need() {
+    command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
+}
+
+load_conf() {
+    UXPLAY_NAME="Kast Receiver"
+    UXPLAY_ARGS=()
+    if [[ -f "${CONF_FILE}" ]]; then
+        # shellcheck disable=SC1090
+        source "${CONF_FILE}"
+    fi
+    if ! declare -p UXPLAY_ARGS >/dev/null 2>&1; then
+        UXPLAY_ARGS=()
+    fi
+}
+
+ensure_state_dir() {
+    mkdir -p "$(dirname "${MODE_FILE}")"
+}
+
+active_wifi_connection() {
+    nmcli -t -f NAME,TYPE,DEVICE connection show --active 2>/dev/null | awk -F: '$2 == "wifi" && $3 != "" { print $1; exit }'
+}
+
+active_wifi_device() {
+    nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$2 == "wifi" && $3 == "connected" { print $1; exit }'
+}
+
+get_mode() {
+    if [[ -f "${MODE_FILE}" ]]; then
+        local mode
+        mode="$(<"${MODE_FILE}")"
+        case "${mode}" in
+            mirror|video-overlay)
+                printf '%s\n' "${mode}"
+                return 0
+                ;;
+        esac
+    fi
+    printf '%s\n' "mirror"
+}
+
+set_mode() {
+    local mode="${1:-}"
+    case "${mode}" in
+        mirror|video-overlay)
+            ensure_state_dir
+            printf '%s\n' "${mode}" > "${MODE_FILE}"
+            # Mode maps to a uxplay launch flag (-fs for video-overlay), so a
+            # running receiver has to restart to pick the new mode up.
+            if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then
+                systemctl --user restart uxplay.service
+            fi
+            ;;
+        *)
+            die "Mode must be 'mirror' or 'video-overlay'"
+            ;;
+    esac
+}
+
+spawn_app() {
+    nohup "$@" >/dev/null 2>&1 &
+}
+
+default_sink_id() {
+    wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null | sed -n '1s/^id \([0-9][0-9]*\).*/\1/p'
+}
+
+list_sinks_json() {
+    need jq
+    need pw-dump
+    local default_id
+    default_id="$(default_sink_id)"
+    pw-dump | jq --arg default_id "${default_id}" '
+        [
+            .[]
+            | select(.type == "PipeWire:Interface:Node")
+            | (.info.props // empty) as $props
+            | select($props["media.class"] == "Audio/Sink")
+            | {
+                id: .id,
+                name: ($props["node.description"] // $props["node.nick"] // $props["node.name"] // ("sink-" + (.id | tostring))),
+                raop: (($props["sess.media"] // "") == "raop"),
+                network: (($props["node.network"] // "false") == "true"),
+                default: ((.id | tostring) == $default_id)
+            }
+        ]
+    '
+}
+
+resolve_sink_id() {
+    local token="${1:-}"
+    [[ -n "${token}" ]] || die "sink selector is required"
+
+    if [[ "${token}" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "${token}"
+        return 0
+    fi
+
+    list_sinks_json | jq -r --arg token "${token}" '
+        (
+            map(select((.name | ascii_downcase) == ($token | ascii_downcase))) | first
+        ) // (
+            map(select((.name | ascii_downcase) | contains($token | ascii_downcase))) | first
+        ) | .id // empty
+    '
+}
+
+select_sink() {
+    need wpctl
+    local sink_id
+    sink_id="$(resolve_sink_id "${1:-}")"
+    [[ -n "${sink_id}" ]] || die "No matching sink found"
+    wpctl set-default "${sink_id}"
+}
+
+select_airplay() {
+    if [[ $# -gt 0 ]]; then
+        select_sink "$*"
+        return 0
+    fi
+
+    local sink_id
+    sink_id="$(list_sinks_json | jq -r 'map(select(.raop == true)) | first | .id // empty')"
+    [[ -n "${sink_id}" ]] || die "No AirPlay sink is currently available"
+    wpctl set-default "${sink_id}"
+}
+
+select_local() {
+    need wpctl
+    local sink_id
+    sink_id="$(list_sinks_json | jq -r 'map(select(.raop == false)) | first | .id // empty')"
+    [[ -n "${sink_id}" ]] || die "No local sink is currently available"
+    wpctl set-default "${sink_id}"
+}
+
+json_bool() {
+    if "$1"; then
+        printf '%s\n' "true"
+    else
+        printf '%s\n' "false"
+    fi
+}
+
+status_json() {
+    load_conf
+    need jq
+
+    local receiver_active="false"
+    local receiver_enabled="false"
+    local display_installed="false"
+    local uxplay_installed="false"
+    local sinks_json="[]"
+    local maybe_sinks
+
+    if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then
+        receiver_active="true"
+    fi
+    if systemctl --user is-enabled --quiet uxplay.service 2>/dev/null; then
+        receiver_enabled="true"
+    fi
+    if command -v gnome-network-displays >/dev/null 2>&1; then
+        display_installed="true"
+    fi
+    if command -v uxplay >/dev/null 2>&1; then
+        uxplay_installed="true"
+    fi
+    if command -v pw-dump >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        if maybe_sinks="$(list_sinks_json 2>/dev/null)"; then
+            sinks_json="${maybe_sinks}"
+        fi
+    fi
+
+    jq -n \
+        --arg receiver_name "${UXPLAY_NAME}" \
+        --arg receiver_active "${receiver_active}" \
+        --arg receiver_enabled "${receiver_enabled}" \
+        --arg display_installed "${display_installed}" \
+        --arg uxplay_installed "${uxplay_installed}" \
+        --arg mirror_mode "$(get_mode)" \
+        --argjson sinks "${sinks_json}" \
+        '{
+            receiver: {
+                name: $receiver_name,
+                active: ($receiver_active == "true"),
+                enabled: ($receiver_enabled == "true"),
+                installed: ($uxplay_installed == "true")
+            },
+            outbound: {
+                display_cast_installed: ($display_installed == "true"),
+                sinks: $sinks,
+                airplay_sink_count: ($sinks | map(select(.raop == true)) | length)
+            },
+            mirror_mode: $mirror_mode
+        }'
+}
+
+status_text() {
+    status_json | jq -r '
+        "Receiver: \(.receiver.name) [" + (if .receiver.active then "active" else "inactive" end) + "]",
+        "Display casting app installed: \(.outbound.display_cast_installed)",
+        "AirPlay sinks discovered: \(.outbound.airplay_sink_count)",
+        "Mirror mode: \(.mirror_mode)"
+    '
+}
+
+install_shortcut() {
+    need gsettings
+    local binding="${1:-<Super>k}"
+    local path="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/kast/"
+    local schema="org.gnome.settings-daemon.plugins.media-keys"
+    local binding_schema="org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${path}"
+    local current
+
+    current="$(gsettings get "${schema}" custom-keybindings)"
+    if ! grep -Fq "${path}" <<<"${current}"; then
+        if [[ "${current}" == "@as []" || "${current}" == "[]" ]]; then
+            current="['${path}']"
+        else
+            current="${current%]}"
+            current="${current}, '${path}']"
+        fi
+        gsettings set "${schema}" custom-keybindings "${current}"
+    fi
+
+    gsettings set "${binding_schema}" name "Kast"
+    gsettings set "${binding_schema}" command "${HOME}/.local/bin/kast open-display-cast"
+    gsettings set "${binding_schema}" binding "${binding}"
+}
+
+open_display_cast_plain() {
+    if command -v gnome-network-displays >/dev/null 2>&1; then
+        spawn_app gnome-network-displays
+    else
+        die "gnome-network-displays is not installed"
+    fi
+}
+
+open_display_cast() {
+    # Default keeps Wi-Fi up. Chromecast and other LAN sinks need the network,
+    # and modern gnome-network-displays forms its own Wi-Fi P2P group for
+    # Miracast on the p2p-dev interface. Only drop Wi-Fi when explicitly asked:
+    # some single-radio adapters can't hold the AP link while a P2P group runs.
+    local drop_wifi=0
+    if [[ "${1:-}" == "--drop-wifi" ]]; then
+        drop_wifi=1
+    fi
+
+    ensure_state_dir
+
+    if [[ "${drop_wifi}" -eq 1 ]]; then
+        local wifi_conn wifi_dev
+        wifi_conn="$(active_wifi_connection)"
+        wifi_dev="$(active_wifi_device)"
+        if [[ -n "${wifi_conn}" ]]; then
+            printf '%s\n' "${wifi_conn}" > "${WIFI_STATE_FILE}"
+        else
+            rm -f "${WIFI_STATE_FILE}"
+        fi
+        if [[ -n "${wifi_dev}" ]]; then
+            nmcli device disconnect "${wifi_dev}" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    open_display_cast_plain
+}
+
+reconnect_wifi() {
+    local wifi_conn
+    wifi_conn=""
+    if [[ -f "${WIFI_STATE_FILE}" ]]; then
+        wifi_conn="$(<"${WIFI_STATE_FILE}")"
+    fi
+    if [[ -n "${wifi_conn}" ]]; then
+        nmcli connection up "${wifi_conn}"
+    else
+        nmcli radio wifi on
+    fi
+}
+
+cast_targets_json() {
+    need jq
+    # Chromecast / Google Cast devices advertise over mDNS as _googlecast._tcp.
+    # avahi-daemon keeps a live cache, so -t returns whatever is already known
+    # without a long blocking scan. We dedup across interfaces by address and
+    # prefer the human "fn" TXT record over the (escaped) service name.
+    if ! command -v avahi-browse >/dev/null 2>&1; then
+        printf '[]\n'
+        return 0
+    fi
+    avahi-browse -rpt _googlecast._tcp 2>/dev/null \
+        | awk -F';' '
+            $1 == "=" && $3 == "IPv4" {
+                name = $4; addr = $8; port = $9; fn = "";
+                n = split($0, q, "\"");
+                for (i = 1; i <= n; i++) {
+                    if (q[i] ~ /^fn=/) { fn = substr(q[i], 4); break }
+                }
+                disp = (fn != "" ? fn : name);
+                gsub(/\\032/, " ", disp);
+                printf "%s\t%s\t%s\n", disp, addr, port;
+            }
+        ' \
+        | jq -R -s '
+            [ split("\n")[]
+              | select(length > 0)
+              | split("\t")
+              | { name: .[0], address: .[1], port: (.[2] | tonumber? // null), protocol: "chromecast" }
+            ]
+            | unique_by(.address)
+        '
+}
+
+cast_targets_text() {
+    cast_targets_json | jq -r '
+        if length == 0 then
+            "No cast targets discovered"
+        else
+            .[] | "\(.name)  [\(.address):\(.port)]  (\(.protocol))"
+        end
+    '
+}
+
+wifi_p2p_device_path() {
+    # NetworkManager D-Bus object path of the Wi-Fi P2P device, if any.
+    local iface
+    iface="$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null \
+        | awk -F: '$2 == "wifi-p2p" && $1 != "" { print $1; exit }')"
+    [[ -n "${iface}" ]] || return 1
+    gdbus call --system \
+        --dest org.freedesktop.NetworkManager \
+        --object-path /org/freedesktop/NetworkManager \
+        --method org.freedesktop.NetworkManager.GetDeviceByIpIface "${iface}" 2>/dev/null \
+        | sed -n "s/.*objectpath '\([^']*\)'.*/\1/p"
+}
+
+miracast_targets_json() {
+    need jq
+    # Miracast sinks are Wi-Fi Display devices reached over Wi-Fi P2P. nmcli has
+    # no P2P verb, so we drive NetworkManager's WifiP2P D-Bus interface directly.
+    # A find shares the Wi-Fi radio, so this is an active, on-demand scan — never
+    # run it on a background timer.
+    if ! command -v gdbus >/dev/null 2>&1 || ! command -v busctl >/dev/null 2>&1; then
+        printf '[]\n'
+        return 0
+    fi
+
+    local nm dev find_sec
+    nm="org.freedesktop.NetworkManager"
+    find_sec="${MIRACAST_FIND_SEC:-8}"
+    dev="$(wifi_p2p_device_path || true)"
+    if [[ -z "${dev}" ]]; then
+        printf '[]\n'
+        return 0
+    fi
+
+    # Always stop the find again, even on Ctrl-C.
+    # shellcheck disable=SC2064
+    trap "gdbus call --system --dest '${nm}' --object-path '${dev}' --method '${nm}.Device.WifiP2P.StopFind' >/dev/null 2>&1 || true" INT TERM
+    gdbus call --system --dest "${nm}" --object-path "${dev}" \
+        --method "${nm}.Device.WifiP2P.StartFind" "{'timeout': <int32 ${find_sec}>}" >/dev/null 2>&1 || true
+
+    sleep "${find_sec}"
+
+    # busctl --json gives clean UTF-8 strings and typed arrays, so we avoid
+    # decoding its octal-escaped text output by hand.
+    local peers_json out peer name hwaddr wfd_len is_mc
+    peers_json="$(busctl --json=short get-property "${nm}" "${dev}" "${nm}.Device.WifiP2P" Peers 2>/dev/null || printf '{}')"
+
+    out="[]"
+    while IFS= read -r peer; do
+        [[ -n "${peer}" ]] || continue
+        name="$(busctl --json=short get-property "${nm}" "${peer}" "${nm}.WifiP2PPeer" Name 2>/dev/null | jq -r '.data // ""' 2>/dev/null || true)"
+        hwaddr="$(busctl --json=short get-property "${nm}" "${peer}" "${nm}.WifiP2PPeer" HwAddress 2>/dev/null | jq -r '.data // ""' 2>/dev/null || true)"
+        # WfdIEs is a byte array; non-empty marks a Wi-Fi Display (Miracast) sink
+        # rather than a generic P2P peer such as a phone.
+        wfd_len="$(busctl --json=short get-property "${nm}" "${peer}" "${nm}.WifiP2PPeer" WfdIEs 2>/dev/null | jq -r '(.data // []) | length' 2>/dev/null || printf '0')"
+        if [[ "${wfd_len:-0}" -gt 0 ]]; then is_mc=true; else is_mc=false; fi
+        out="$(jq -c \
+            --arg name "${name}" \
+            --arg hwaddr "${hwaddr}" \
+            --argjson miracast "${is_mc}" \
+            '. + [{name: (if $name == "" then "Unknown device" else $name end), hwaddr: $hwaddr, miracast: $miracast, protocol: "miracast"}]' \
+            <<<"${out}" 2>/dev/null || printf '%s' "${out}")"
+    done < <(jq -r '.data[]? // empty' <<<"${peers_json}" 2>/dev/null)
+
+    gdbus call --system --dest "${nm}" --object-path "${dev}" \
+        --method "${nm}.Device.WifiP2P.StopFind" >/dev/null 2>&1 || true
+    trap - INT TERM
+
+    printf '%s\n' "${out}"
+}
+
+miracast_targets_text() {
+    miracast_targets_json | jq -r '
+        if length == 0 then
+            "No Miracast displays discovered"
+        else
+            .[] | .name + (if .miracast then "  (Wi-Fi Display)" else "  (P2P peer)" end)
+        end
+    '
+}
+
+open_sound() {
+    if command -v gnome-control-center >/dev/null 2>&1; then
+        spawn_app gnome-control-center sound
+    else
+        die "gnome-control-center is not installed"
+    fi
+}
+
+receiver_run() {
+    load_conf
+    need uxplay
+    local mode_args=()
+    if [[ "$(get_mode)" == "video-overlay" ]]; then
+        # uxplay -fs is the Wayland-native way to fullscreen the receiver
+        # window; no external window manager is involved.
+        mode_args+=(-fs)
+    fi
+    exec uxplay -n "${UXPLAY_NAME}" -nh "${mode_args[@]}" "${UXPLAY_ARGS[@]}"
+}
+
+receiver_status() {
+    systemctl --user status uxplay.service --no-pager
+}
+
+toggle_receiver() {
+    if systemctl --user is-active --quiet uxplay.service; then
+        systemctl --user stop uxplay.service
+    else
+        systemctl --user start uxplay.service
+    fi
+}
+
+DOCTOR_OK=0
+DOCTOR_WARN=0
+DOCTOR_FAIL=0
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+mark() {
+    case "$1" in
+        ok)   printf '  [ OK ] %s\n' "$2"; DOCTOR_OK=$((DOCTOR_OK + 1)) ;;
+        warn) printf '  [WARN] %s\n' "$2"; [[ -n "${3:-}" ]] && printf '         -> %s\n' "$3"; DOCTOR_WARN=$((DOCTOR_WARN + 1)) ;;
+        fail) printf '  [FAIL] %s\n' "$2"; [[ -n "${3:-}" ]] && printf '         -> %s\n' "$3"; DOCTOR_FAIL=$((DOCTOR_FAIL + 1)) ;;
+    esac
+}
+
+doctor_run() {
+    printf 'kast doctor (v%s)\n\n' "${KAST_VERSION}"
+
+    printf 'Core tools\n'
+    local c
+    for c in jq wpctl pw-dump nmcli; do
+        if have "${c}"; then mark ok "${c}"; else mark fail "${c} missing" "run ./install.sh, or apt install the package providing ${c}"; fi
+    done
+
+    printf '\nDiscovery\n'
+    if have avahi-browse; then mark ok "avahi-browse (Chromecast mDNS)"; else mark warn "avahi-browse missing" "Chromecast discovery off; apt install avahi-utils"; fi
+    if have gdbus && have busctl; then mark ok "gdbus + busctl (Miracast P2P)"; else mark warn "gdbus/busctl missing" "Miracast discovery off"; fi
+    if nmcli -t -f TYPE device status 2>/dev/null | grep -qx 'wifi-p2p'; then mark ok "Wi-Fi P2P device present"; else mark warn "no Wi-Fi P2P device" "this adapter can't do Miracast"; fi
+
+    printf '\nReceiver (inbound AirPlay)\n'
+    if have uxplay; then mark ok "uxplay installed"; else mark warn "uxplay not installed" "apt install uxplay for receiver mode"; fi
+    if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then mark ok "uxplay.service active"; else mark warn "uxplay.service inactive" "kast receiver-start"; fi
+
+    printf '\nOutbound display cast\n'
+    if have gnome-network-displays; then mark ok "gnome-network-displays installed"; else mark fail "gnome-network-displays missing" "apt install gnome-network-displays"; fi
+
+    printf '\nAudio routing\n'
+    local raop="${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
+    if [[ -f "${raop}" ]]; then mark ok "PipeWire RAOP discovery config installed"; else mark warn "RAOP config missing" "re-run ./install.sh"; fi
+
+    printf '\nDesktop integration\n'
+    if systemctl --user is-active --quiet kast-tray.service 2>/dev/null; then mark ok "kast-tray.service active"; else mark warn "kast-tray.service inactive" "systemctl --user start kast-tray.service"; fi
+    if gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings 2>/dev/null | grep -q '/custom-keybindings/kast/'; then mark ok "Super+K shortcut installed"; else mark warn "shortcut not installed" "kast install-shortcut"; fi
+
+    printf '\n%d ok, %d warning(s), %d failure(s)\n' "${DOCTOR_OK}" "${DOCTOR_WARN}" "${DOCTOR_FAIL}"
+    [[ "${DOCTOR_FAIL}" -eq 0 ]]
+}
+
+usage() {
+    cat <<'EOF'
+Usage:
+  kast status [--json]
+  kast sinks [--json]
+  kast cast-targets [--json]
+  kast miracast-targets [--json]
+  kast open-display-cast [--drop-wifi]
+  kast open-display-cast-plain
+  kast open-sound
+  kast reconnect-wifi
+  kast select-sink <id|name>
+  kast select-airplay [name]
+  kast select-local
+  kast set-mode <mirror|video-overlay>
+  kast get-mode
+  kast receiver-run
+  kast receiver-start
+  kast receiver-stop
+  kast receiver-restart
+  kast receiver-status
+  kast toggle-receiver
+  kast install-shortcut [binding]
+  kast doctor
+  kast version
+EOF
+}
+
+cmd="${1:-status}"
+if [[ $# -gt 0 ]]; then
+    shift
+fi
+
+case "${cmd}" in
+    status)
+        if [[ "${1:-}" == "--json" ]]; then
+            status_json
+        else
+            status_text
+        fi
+        ;;
+    cast-targets)
+        if [[ "${1:-}" == "--json" ]]; then
+            cast_targets_json
+        else
+            cast_targets_text
+        fi
+        ;;
+    miracast-targets)
+        if [[ "${1:-}" == "--json" ]]; then
+            miracast_targets_json
+        else
+            miracast_targets_text
+        fi
+        ;;
+    sinks)
+        if [[ "${1:-}" == "--json" ]]; then
+            list_sinks_json
+        else
+            list_sinks_json | jq -r '
+                .[]
+                | (if .default then "*" else " " end) + " [" + (.id | tostring) + "] " + .name + (if .raop then " [AirPlay]" else "" end)
+            '
+        fi
+        ;;
+    open-display-cast|menu)
+        open_display_cast "$@"
+        ;;
+    open-display-cast-plain)
+        open_display_cast_plain
+        ;;
+    open-sound)
+        open_sound
+        ;;
+    reconnect-wifi)
+        reconnect_wifi
+        ;;
+    select-sink)
+        [[ $# -gt 0 ]] || die "select-sink requires an id or name"
+        select_sink "$*"
+        ;;
+    select-airplay)
+        select_airplay "$@"
+        ;;
+    select-local)
+        select_local
+        ;;
+    set-mode)
+        set_mode "${1:-}"
+        ;;
+    get-mode)
+        get_mode
+        ;;
+    receiver-run)
+        receiver_run
+        ;;
+    receiver-start)
+        systemctl --user start uxplay.service
+        ;;
+    receiver-stop)
+        systemctl --user stop uxplay.service
+        ;;
+    receiver-restart)
+        systemctl --user restart uxplay.service
+        ;;
+    receiver-status)
+        receiver_status
+        ;;
+    toggle-receiver)
+        toggle_receiver
+        ;;
+    install-shortcut)
+        install_shortcut "${1:-<Super>k}"
+        ;;
+    doctor)
+        doctor_run
+        ;;
+    version|--version|-v)
+        printf 'kast %s\n' "${KAST_VERSION}"
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        die "Unknown command: ${cmd}"
+        ;;
+esac

@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: shellcheck install.sh uninstall.sh scripts/kast
+
+      - name: Python (compile + pyflakes)
+        run: |
+          python3 -m py_compile scripts/kast-tray.py
+          python3 -m pip install --quiet pyflakes
+          python3 -m pyflakes scripts/kast-tray.py
+
+      - name: Shell extension (syntax)
+        run: node --check "shell-extension/kast@asuramaya/extension.js"
+
+      - name: Shell extension metadata (valid JSON)
+        run: python3 -c "import json; json.load(open('shell-extension/kast@asuramaya/metadata.json'))"
+
+      - name: CLI smoke
+        run: |
+          bash scripts/kast version
+          bash scripts/kast --help

@@ -1,0 +1,5 @@
+# Keep CI/dev-only files out of `git archive` release tarballs.
+/.github       export-ignore
+/.gitattributes export-ignore
+/.gitignore    export-ignore
+/.shellcheckrc export-ignore
