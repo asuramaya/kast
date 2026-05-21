@@ -12,9 +12,6 @@ It is not a single protocol-unified backend. Linux has no one upstream stack for
 Miracast, and Chromecast, so Kast wires together the native packages that already ship in
 Ubuntu 25.10 and presents them behind two Quick Settings tiles and one shortcut.
 
-Why "Kast" and not "Ctrl+K": the Windows feature is **`Win+K`** (Cast / Connect), so the
-default shortcut here is `Super+K` — `Super` is the Windows key. The name keeps the `K`.
-
 - Outbound AirPlay audio via PipeWire RAOP
 - Outbound Miracast and Chromecast display casting via `gnome-network-displays`
 - Inbound AirPlay receiver mode via `uxplay`
