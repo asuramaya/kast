@@ -106,6 +106,37 @@ You can set:
 - Receiver name
 - Extra `uxplay` flags such as `-h265` or `-pin`
 
+## Tray menu
+
+The top-bar tray (and the optional shell extension) show, top to bottom:
+
+- Receiver state and mode (mirror / video-overlay)
+- **Display Cast…** (keeps Wi-Fi) and **Display Cast — Miracast (drops Wi-Fi)…**
+- **Chromecast Targets** discovered on the LAN, with a rescan action
+- **Miracast Displays**, behind an on-demand **Scan for Miracast displays**
+- AirPlay output sinks (click to route audio there) and **Use Local Speakers**
+- Receiver controls (start/stop/restart) and mode toggles
+
+Selecting a discovered target opens `gnome-network-displays` to complete the connection
+(see the limitation below).
+
+## Troubleshooting
+
+Run `kast doctor` first — it checks tools, discovery, the receiver, outbound casting, audio
+routing, and desktop integration, and prints a fix hint for each problem.
+
+- **`kast: command not found`** — `~/.local/bin` isn't on your `PATH`. Add it to your shell
+  profile, or log out and back in.
+- **No tray icon** — the tray relies on AppIndicator support. On GNOME, enable the
+  *AppIndicator and KStatusNotifierItem Support* extension, then
+  `systemctl --user restart kast-tray.service`.
+- **No Miracast displays found** — discovery is an on-demand Wi-Fi P2P find; some adapters
+  can't do P2P at all (`kast doctor` reports this). Try again near the display.
+- **Chromecast cast drops the network** — fixed in the default action; only the explicit
+  *Miracast (drops Wi-Fi)* item disconnects Wi-Fi. Use **Display Cast…** for Chromecast.
+- **AirPlay sinks don't appear** — confirm the RAOP config is installed (`kast doctor`) and
+  the speaker is on the same network.
+
 ## Status & Roadmap
 
 What is real today:

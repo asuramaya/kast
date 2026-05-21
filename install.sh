@@ -34,7 +34,9 @@ bootstrap_from_release() {
     tar -xzf "${tarball}" -C "${tmp}"
     inner="$(find "${tmp}" -maxdepth 2 -name install.sh -type f | head -n1)"
     [[ -n "${inner}" ]] || { printf 'install.sh not found in archive\n' >&2; exit 1; }
-    exec bash "${inner}" "$@"
+    # Run (don't exec) so the EXIT trap above can clean up the temp checkout.
+    bash "${inner}" "$@"
+    exit $?
 }
 
 if [[ ! -f "${ROOT_DIR}/scripts/kast" ]]; then
@@ -151,7 +153,7 @@ Kast v${KAST_VERSION} installed.
   - Cast:      kast open-display-cast        (Chromecast / LAN: keeps Wi-Fi)
                kast open-display-cast --drop-wifi   (Miracast)
   - Discover:  kast cast-targets    kast miracast-targets
-  - Remove:    ./uninstall.sh
+  - Remove:    curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/uninstall.sh | bash
 EOF
 
 if [[ -n "${PACKAGE_STATUS_NOTE}" ]]; then

@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in kast isn't working
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the report! Please run `kast doctor` and paste its output below — it captures most of what we need.
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`kast doctor` output"
+      description: Paste the full output of `kast doctor`.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: kast version
+      description: Output of `kast version`.
+      placeholder: kast 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Ubuntu / GNOME / session
+      description: e.g. Ubuntu 25.10, GNOME 49, Wayland (see `echo $XDG_SESSION_TYPE`)
+      placeholder: Ubuntu 25.10, GNOME 49, Wayland
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: e.g. `journalctl --user -u kast-tray.service -u uxplay.service -n 50`
+      render: text
+    validations:
+      required: false

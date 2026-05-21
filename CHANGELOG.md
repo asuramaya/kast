@@ -3,6 +3,18 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-05-21
+
+### Added
+- Community health files: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue
+  forms, and a pull-request template.
+- README: "Tray menu" and "Troubleshooting" sections.
+
+### Fixed
+- The post-install "Remove" hint now works for `curl | bash` installs (it pointed at a
+  local `./uninstall.sh` that those users don't have).
+- The `curl | bash` bootstrap no longer leaks its temporary download directory in `/tmp`.
+
 ## [0.1.0] - 2026-05-21
 
 Initial release. A Win+K-style cast panel for GNOME on Ubuntu 25.10.
@@ -24,4 +36,5 @@ Initial release. A Win+K-style cast panel for GNOME on Ubuntu 25.10.
 - `gnome-network-displays` exposes no connect API, so kast discovers and lists cast
   targets but hands off to its picker to complete the connection.
 
+[0.1.1]: https://github.com/asuramaya/kast/releases/tag/v0.1.1
 [0.1.0]: https://github.com/asuramaya/kast/releases/tag/v0.1.0

@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an improvement to kast
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that kast makes hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like kast to do? CLI command, tray entry, behaviour change?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / notes
+      description: Anything you already tried, or constraints worth knowing (e.g. relies on a tool that has no CLI/D-Bus).
+    validations:
+      required: false

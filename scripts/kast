@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_ID="kast"
-KAST_VERSION="0.1.0"
+KAST_VERSION="0.1.1"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 CONF_FILE="${CONFIG_HOME}/${APP_ID}/uxplay.conf"
