@@ -4,8 +4,12 @@
 UXPLAY_NAME="Kast Receiver"
 
 # Extra arguments forwarded to uxplay.
-# Examples:
-# UXPLAY_ARGS=(-h265)
-# UXPLAY_ARGS=(-pin 2468)
-# UXPLAY_ARGS=(-h265 -pin 2468)
-UXPLAY_ARGS=()
+# Ships with -pin so a sender must enter a 4-digit PIN (shown on screen) before
+# it can mirror — the receiver listens on the whole LAN, so this gates access.
+# Remove -pin for frictionless (open) receiving; use "-pin 2468" for a fixed PIN.
+# Other examples: UXPLAY_ARGS=(-h265 -pin)
+UXPLAY_ARGS=(-pin)
+
+# Make "Display Cast…" drop Wi-Fi by default (1) or keep it (0). Needed for
+# Miracast on single-radio adapters. Editable from Kast preferences.
+KAST_DROP_WIFI_DEFAULT=0

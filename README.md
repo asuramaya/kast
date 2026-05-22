@@ -5,18 +5,18 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 `Kast` is a one-line Ubuntu setup that brings a **Windows `Win+K`-style cast panel** to
-GNOME on Ubuntu 25.10 — as native **Quick Settings tiles**. Open the system menu, pick a
+GNOME on Ubuntu 25.10 — as a native **Quick Settings tile**. Open the system menu, pick a
 target, cast — and route audio to AirPlay speakers, all from the same panel as Wi-Fi/BT.
 
 It is not a single protocol-unified backend. Linux has no one upstream stack for AirPlay,
 Miracast, and Chromecast, so Kast wires together the native packages that already ship in
-Ubuntu 25.10 and presents them behind two Quick Settings tiles and one shortcut.
+Ubuntu 25.10 and presents them behind one Quick Settings tile and one shortcut.
 
 - Outbound AirPlay audio via PipeWire RAOP
 - Outbound Miracast and Chromecast display casting via `gnome-network-displays`
 - Inbound AirPlay receiver mode via `uxplay`
-- A **Cast** tile and a **Receiver** toggle in GNOME Quick Settings for targets, receiver
-  state, AirPlay sink selection, and mirror/overlay mode
+- A single **Kast** tile in GNOME Quick Settings: cast targets, the AirPlay receiver toggle,
+  sink selection, and mirror/overlay mode, plus a preferences dialog
 
 ## Scope
 
@@ -24,7 +24,7 @@ Ubuntu 25.10 and presents them behind two Quick Settings tiles and one shortcut.
 - `AirPlay display out`: no native sender backend included
 - `Miracast display out`: yes, through `gnome-network-displays`
 - `Chromecast display out`: yes, through `gnome-network-displays`
-- `AirPlay receive in`: yes, through `uxplay`
+- `AirPlay receive in`: yes, through `uxplay` (off by default; PIN-gated when on)
 
 ## One-Line Install
 
@@ -50,12 +50,12 @@ After installing, run `kast doctor` to confirm the stack is healthy.
 1. Installs the native Ubuntu packages listed in [packages.txt](packages.txt).
 2. Enables PipeWire RAOP discovery with [50-raop.conf](config/pipewire/50-raop.conf).
 3. Installs the `kast` CLI into `~/.local/bin`.
-4. Installs `uxplay` user services.
-5. Installs and enables the GNOME Quick Settings extension (Cast + Receiver tiles).
+4. Installs the `uxplay` receiver service (left **off** by default — it's a LAN listener).
+5. Installs and enables the GNOME Quick Settings extension (the Kast tile + preferences).
 6. Adds a GNOME app launcher and a default `Super+K` shortcut.
 
 > **Log out and back in** after installing — Wayland can't hot-reload shell extensions,
-> so the Kast tiles appear in Quick Settings only on your next login.
+> so the Kast tile appears in Quick Settings only on your next login.
 
 ## Updating
 
@@ -64,8 +64,8 @@ kast check-update    # is a newer release available?
 kast update          # update in place from the latest GitHub release
 ```
 
-The Quick Settings tiles also check periodically and surface an "⬆ Update to vX.Y.Z"
-entry when one is available — clicking it runs the update for you.
+The Kast tile also checks periodically and surfaces an "⬆ Update to vX.Y.Z" entry when one
+is available — clicking it runs the update for you.
 
 ## Uninstall
 
@@ -81,12 +81,12 @@ Apt packages are left installed (they are shared system components).
 - [install.sh](install.sh): bootstrap entrypoint (self-bootstraps when piped from curl)
 - [uninstall.sh](uninstall.sh): symmetric uninstaller (`--purge` also removes config/state)
 - [scripts/kast](scripts/kast): runtime CLI; the extension shells out to `kast … --json`
-- [shell-extension/kast@asuramaya/](shell-extension/kast@asuramaya): the GNOME Quick Settings UI (Cast + Receiver tiles)
+- [shell-extension/kast@asuramaya/](shell-extension/kast@asuramaya): the GNOME Quick Settings UI (`extension.js` tile + `prefs.js` dialog)
 - [systemd/user/uxplay.service](systemd/user/uxplay.service): AirPlay receiver (uses `uxplay -fs` for video-overlay mode)
 
 ## Default UX
 
-- Cast + Receiver tiles in the GNOME Quick Settings menu (top-right), next to Wi-Fi/BT
+- A Kast tile in the GNOME Quick Settings menu (top-right), next to Wi-Fi/BT
 - `Super+K` (the `Win+K` equivalent) launches display casting
 - `kast status` shows stack status; `kast doctor` runs a full health check
 - `kast cast-targets` lists Chromecast / Google Cast devices discovered on the LAN (mDNS)
@@ -115,19 +115,29 @@ You can set:
 - Receiver name
 - Extra `uxplay` flags such as `-h265` or `-pin`
 
-## Quick Settings tiles
+## Quick Settings tile
 
-Open the system menu (top-right). Two Kast tiles sit alongside Wi-Fi/Bluetooth:
+Open the system menu (top-right). One **Kast** tile sits alongside Wi-Fi/Bluetooth. Click
+the tile to open the display picker; the ⌄ expands a native menu with two sections:
 
-- **Cast** — click the tile to open the display picker; the ⌄ expands a native menu with
-  **Display Cast…**, **Miracast (drops Wi-Fi)…**, discovered **Chromecast** targets (+ rescan),
-  and an on-demand **Scan for Miracast displays**.
-- **Receiver** — the pill toggles the inbound AirPlay receiver on/off; the ⌄ expands
-  mirror/overlay **Mode**, **AirPlay output** sinks (+ Use Local Speakers), **Restart**,
-  **Sound Settings…**, and the version / update entry.
+- **Cast** — **Display Cast…**, **Miracast (drops Wi-Fi)…**, discovered **Chromecast**
+  targets (+ rescan), and an on-demand **Scan for Miracast displays**.
+- **Receiver** — an **AirPlay Receiver** on/off switch, mirror/overlay **Mode**, **AirPlay
+  output** sinks (+ Use Local Speakers), and **Restart Receiver**. The receiver is **off by
+  default** (it's a LAN-facing listener) — flip the switch on to receive; it's PIN-gated when
+  on, and PIN is only a 4-digit speed bump, so turn it back off when you're done.
+
+Below that: **Sound/Display Settings…**, **Kast Settings…** (the preferences dialog), and the
+version / update entry.
 
 Selecting a discovered target opens `gnome-network-displays` to complete the connection
 (see the limitation below).
+
+### Preferences
+
+**Kast Settings…** (or `gnome-extensions prefs kast@asuramaya`) opens an Adwaita dialog for
+the receiver name, H.265, require-PIN, and the default "drop Wi-Fi when casting" behaviour.
+It writes `~/.config/kast/uxplay.conf` — the same file the CLI reads.
 
 ## Troubleshooting
 
@@ -151,11 +161,12 @@ routing, and desktop integration, and prints a fix hint for each problem.
 What is real today:
 
 - Installer and service plumbing
-- GNOME Quick Settings tiles (Cast + Receiver) — receiver toggle, AirPlay sink routing, mode
+- A unified GNOME Quick Settings tile — cast, receiver toggle, AirPlay sink routing, mode
+- Preferences dialog (receiver name, H.265, PIN, default Wi-Fi behaviour)
 - Inbound AirPlay receive via `uxplay`
-- Casting keeps Wi-Fi up by default; only the explicit Miracast action drops it
+- Casting keeps Wi-Fi up by default (configurable); only the Miracast action drops it
 - Video-overlay mode via native `uxplay -fs` (works on Wayland)
-- In-panel Chromecast discovery via mDNS (`_googlecast._tcp`), listed in the Cast tile
+- In-panel Chromecast discovery via mDNS (`_googlecast._tcp`), listed in the Kast tile
 - On-demand Miracast display discovery via NetworkManager's Wi-Fi P2P D-Bus interface
   (`kast miracast-targets`), listed in the panel behind a "Scan for Miracast displays" action
 

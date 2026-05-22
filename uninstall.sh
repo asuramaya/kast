@@ -48,8 +48,23 @@ kill_tray() {
 }
 
 disable_extension() {
-    command -v gnome-extensions >/dev/null 2>&1 || return 0
-    gnome-extensions disable kast@asuramaya >/dev/null 2>&1 || true
+    command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions disable kast@asuramaya >/dev/null 2>&1 || true
+    command -v gsettings >/dev/null 2>&1 || return 0
+    # Drop the uuid from the enabled-extensions list (preserve the others).
+    local current
+    current="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || echo '@as []')"
+    if grep -Fq "'kast@asuramaya'" <<<"${current}"; then
+        current="$(python3 - "${current}" <<'PY' 2>/dev/null || printf '%s' "${current}"
+import ast, sys
+try:
+    items = [x for x in ast.literal_eval(sys.argv[1]) if x != "kast@asuramaya"]
+except Exception:
+    items = []
+print(repr(items) if items else "@as []")
+PY
+)"
+        gsettings set org.gnome.shell enabled-extensions "${current}" >/dev/null 2>&1 || true
+    fi
 }
 
 remove_files() {

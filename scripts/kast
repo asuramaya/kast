@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_ID="kast"
-KAST_VERSION="0.1.3"
+KAST_VERSION="0.2.0"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
@@ -260,7 +260,10 @@ open_display_cast() {
     # and modern gnome-network-displays forms its own Wi-Fi P2P group for
     # Miracast on the p2p-dev interface. Only drop Wi-Fi when explicitly asked:
     # some single-radio adapters can't hold the AP link while a P2P group runs.
+    # The default can be flipped in preferences (KAST_DROP_WIFI_DEFAULT).
     local drop_wifi=0
+    load_conf
+    [[ "${KAST_DROP_WIFI_DEFAULT:-0}" == "1" ]] && drop_wifi=1
     if [[ "${1:-}" == "--drop-wifi" ]]; then
         drop_wifi=1
     fi
@@ -317,6 +320,10 @@ cast_targets_json() {
                 }
                 disp = (fn != "" ? fn : name);
                 gsub(/\\032/, " ", disp);
+                # Device names are attacker-controlled (mDNS). Strip tab/CR/LF so
+                # a name cannot break out of the tab-delimited handoff to jq and
+                # forge entries. addr/port come from avahi fields, not the name.
+                gsub(/[\t\r\n]/, " ", disp);
                 printf "%s\t%s\t%s\n", disp, addr, port;
             }
         ' \
@@ -428,6 +435,14 @@ open_sound() {
     fi
 }
 
+open_display() {
+    if command -v gnome-control-center >/dev/null 2>&1; then
+        spawn_app gnome-control-center display
+    else
+        die "gnome-control-center is not installed"
+    fi
+}
+
 receiver_run() {
     load_conf
     need uxplay
@@ -480,9 +495,9 @@ doctor_run() {
     if have gdbus && have busctl; then mark ok "gdbus + busctl (Miracast P2P)"; else mark warn "gdbus/busctl missing" "Miracast discovery off"; fi
     if nmcli -t -f TYPE device status 2>/dev/null | grep -qx 'wifi-p2p'; then mark ok "Wi-Fi P2P device present"; else mark warn "no Wi-Fi P2P device" "this adapter can't do Miracast"; fi
 
-    printf '\nReceiver (inbound AirPlay)\n'
+    printf '\nReceiver (inbound AirPlay, off by default)\n'
     if have uxplay; then mark ok "uxplay installed"; else mark warn "uxplay not installed" "apt install uxplay for receiver mode"; fi
-    if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then mark ok "uxplay.service active"; else mark warn "uxplay.service inactive" "kast receiver-start"; fi
+    if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then mark ok "receiver running (PIN-gated)"; else mark ok "receiver off (enable from the Kast tile)"; fi
 
     printf '\nOutbound display cast\n'
     if have gnome-network-displays; then mark ok "gnome-network-displays installed"; else mark fail "gnome-network-displays missing" "apt install gnome-network-displays"; fi
@@ -565,6 +580,7 @@ Usage:
   kast open-display-cast [--drop-wifi]
   kast open-display-cast-plain
   kast open-sound
+  kast open-display
   kast reconnect-wifi
   kast select-sink <id|name>
   kast select-airplay [name]
@@ -630,6 +646,9 @@ case "${cmd}" in
         ;;
     open-sound)
         open_sound
+        ;;
+    open-display)
+        open_display
         ;;
     reconnect-wifi)
         reconnect_wifi

@@ -83,7 +83,9 @@ done
 install_packages() {
     mapfile -t packages < <(grep -Ev '^\s*(#|$)' "${ROOT_DIR}/packages.txt")
     sudo apt-get update
-    sudo apt-get install -y "${packages[@]}"
+    # `--` stops a stray/crafted packages.txt line (e.g. "-o ...") from being
+    # parsed as an apt option instead of a package name.
+    sudo apt-get install -y -- "${packages[@]}"
 }
 
 install_user_files() {
@@ -97,6 +99,7 @@ install_user_files() {
     install -D -m 644 "${ROOT_DIR}/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
     # GNOME Quick Settings extension — the primary UI.
     install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/extension.js" "${EXT_DIR}/extension.js"
+    install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/prefs.js" "${EXT_DIR}/prefs.js"
     install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/metadata.json" "${EXT_DIR}/metadata.json"
 }
 
@@ -111,22 +114,32 @@ remove_legacy_tray() {
 
 enable_services() {
     systemctl --user daemon-reload
-    if command -v uxplay >/dev/null 2>&1; then
-        systemctl --user enable uxplay.service
-        systemctl --user start uxplay.service
-    else
-        systemctl --user disable --now uxplay.service >/dev/null 2>&1 || true
-        PACKAGE_STATUS_NOTE="uxplay and other apt-managed pieces are not installed yet."
-        printf 'Skipping uxplay startup because the package is not installed.\n'
+    # The receiver is a LAN-facing listener, so it ships OFF by default: installed
+    # but neither enabled nor started. Turn it on from the Kast tile (or
+    # `kast receiver-start`) only when you actually want to receive.
+    systemctl --user disable uxplay.service >/dev/null 2>&1 || true
+    if ! command -v uxplay >/dev/null 2>&1; then
+        PACKAGE_STATUS_NOTE="uxplay is not installed yet; the AirPlay receiver is unavailable."
     fi
     systemctl --user restart pipewire.service pipewire-pulse.service wireplumber.service || true
 }
 
 enable_extension() {
-    if command -v gnome-extensions >/dev/null 2>&1; then
-        # Adds the uuid to the enabled list; it loads on the next login (Wayland
-        # cannot hot-reload shell extensions).
-        gnome-extensions enable "${EXT_UUID}" >/dev/null 2>&1 || true
+    # `gnome-extensions enable` refuses an extension the running shell hasn't
+    # scanned yet (true right after a fresh install), so also write the
+    # enabled-extensions gsettings list directly. The shell honors it on the
+    # next login (Wayland cannot hot-reload shell extensions).
+    command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "${EXT_UUID}" >/dev/null 2>&1 || true
+    command -v gsettings >/dev/null 2>&1 || return 0
+    local current
+    current="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || echo '@as []')"
+    if ! grep -Fq "'${EXT_UUID}'" <<<"${current}"; then
+        if [[ "${current}" == "@as []" || "${current}" == "[]" ]]; then
+            current="['${EXT_UUID}']"
+        else
+            current="${current%]}, '${EXT_UUID}']"
+        fi
+        gsettings set org.gnome.shell enabled-extensions "${current}" >/dev/null 2>&1 || true
     fi
 }
 
@@ -157,14 +170,16 @@ cat <<EOF
 
 Kast v${KAST_VERSION} installed.
 
-  *** Log out and back in to load the Kast tiles in GNOME Quick Settings. ***
+  *** Log out and back in to load the Kast tile in GNOME Quick Settings. ***
       (Wayland can't hot-reload shell extensions.)
 
-  - UI:        Cast + Receiver tiles in the Quick Settings menu (top-right)
+  - UI:        the Kast tile in the Quick Settings menu (top-right)
   - Shortcut:  press ${SHORTCUT_LABEL} to open display casting
   - Check it:  kast doctor
   - Cast:      kast open-display-cast        (Chromecast / LAN: keeps Wi-Fi)
                kast open-display-cast --drop-wifi   (Miracast)
+  - Receiver:  OFF by default (it is a LAN listener). Turn it on from the Kast
+               tile when you want to receive; it is PIN-gated when on.
   - Update:    kast update
   - Remove:    curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/main/uninstall.sh | bash
 EOF

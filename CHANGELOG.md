@@ -3,6 +3,42 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-05-21
+
+### Added
+- **Preferences dialog** (`prefs.js`, opens from the Extensions app and a "Kast Settings…"
+  menu entry): receiver name, H.265, require-PIN, and a default "drop Wi-Fi when casting"
+  toggle — all written to `~/.config/kast/uxplay.conf` (the CLI's existing config).
+- `KAST_DROP_WIFI_DEFAULT` config option, honored by `kast open-display-cast`.
+- `kast open-display` (opens the GNOME Display settings panel); "Sound/Display Settings…"
+  links in the tile menu.
+
+### Changed
+- **The Cast and Receiver tiles are now one unified "Kast" tile.** Its menu has a Cast
+  section (Display Cast / Miracast / Chromecast + Miracast discovery) and a Receiver section
+  (an on/off switch, mode, AirPlay output), plus the settings links and version/update —
+  fixing the two tiles landing in different Quick Settings rows.
+- **The AirPlay receiver is now OFF by default.** It's a LAN-facing listener, so `install.sh`
+  no longer enables/starts it — turn it on from the Kast tile (or `kast receiver-start`) when
+  you want to receive. When on it is **PIN-gated** (`UXPLAY_ARGS=(-pin)`); the PIN is a 4-digit
+  speed bump, not strong auth, so the real protection is leaving the receiver off when idle.
+
+### Security
+- `prefs.js` sanitizes values written to the bash-sourced `uxplay.conf` (strips `$ \` " \`
+  and newlines from the receiver name, rejects non-token args), so GUI input can't inject
+  shell commands that would run when the CLI sources the config.
+- `kast cast-targets` strips tab/CR/LF from attacker-controlled mDNS device names so a
+  malicious advert can't forge or corrupt entries in the cast list. (Verified against a live
+  hostile advert: no field-shift, no address spoof, no exec — avahi pre-escapes control
+  chars and the name only ever reaches `jq` as a string.)
+- `install.sh` passes `--` to `apt-get install` so a crafted `packages.txt` line cannot be
+  parsed as an apt option.
+
+### Fixed
+- The installer reliably **enables** the extension on a fresh install by writing
+  `org.gnome.shell enabled-extensions` directly (`gnome-extensions enable` refuses an
+  extension the running shell hasn't scanned yet). `uninstall.sh` removes the uuid.
+
 ## [0.1.3] - 2026-05-21
 
 ### Changed
@@ -67,6 +103,7 @@ Initial release. A Win+K-style cast panel for GNOME on Ubuntu 25.10.
 - `gnome-network-displays` exposes no connect API, so kast discovers and lists cast
   targets but hands off to its picker to complete the connection.
 
+[0.2.0]: https://github.com/asuramaya/kast/releases/tag/v0.2.0
 [0.1.3]: https://github.com/asuramaya/kast/releases/tag/v0.1.3
 [0.1.2]: https://github.com/asuramaya/kast/releases/tag/v0.1.2
 [0.1.1]: https://github.com/asuramaya/kast/releases/tag/v0.1.1

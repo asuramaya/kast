@@ -23,6 +23,9 @@ kast runs entirely in your user session — there is no privileged daemon. It do
 - set a GNOME custom keybinding,
 - run `uxplay` as an **inbound AirPlay receiver**, which listens on the local network.
 
-If you don't want the receiver reachable, stop it (`kast receiver-stop`) or require a PIN
-via `UXPLAY_ARGS=(-pin)` in `~/.config/kast/uxplay.conf`. The apt packages in
-`packages.txt` are upstream-maintained; report issues in them to their respective projects.
+The receiver ships **PIN-gated by default** (`UXPLAY_ARGS=(-pin)`): a sender must enter the
+on-screen 4-digit PIN before it can mirror. Note the PIN is only 4 digits — a speed bump, not
+strong authentication — and the receiver still binds all interfaces. **The real protection is
+to stop the receiver when you're not using it** (`kast receiver-stop`, or untick the receiver
+in the Kast tile). Untick "Require PIN" in preferences for open receiving. The apt packages in `packages.txt`
+are upstream-maintained; report issues in them to their respective projects.
