@@ -48,7 +48,9 @@ kill_tray() {
 }
 
 disable_extension() {
-    command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions disable kast@asuramaya >/dev/null 2>&1 || true
+    if command -v gnome-extensions >/dev/null 2>&1; then
+        gnome-extensions disable kast@asuramaya >/dev/null 2>&1 || true
+    fi
     command -v gsettings >/dev/null 2>&1 || return 0
     # Drop the uuid from the enabled-extensions list (preserve the others).
     local current

@@ -129,7 +129,9 @@ enable_extension() {
     # scanned yet (true right after a fresh install), so also write the
     # enabled-extensions gsettings list directly. The shell honors it on the
     # next login (Wayland cannot hot-reload shell extensions).
-    command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable "${EXT_UUID}" >/dev/null 2>&1 || true
+    if command -v gnome-extensions >/dev/null 2>&1; then
+        gnome-extensions enable "${EXT_UUID}" >/dev/null 2>&1 || true
+    fi
     command -v gsettings >/dev/null 2>&1 || return 0
     local current
     current="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || echo '@as []')"
