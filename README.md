@@ -156,6 +156,25 @@ routing, and desktop integration, and prints a fix hint for each problem.
 - **AirPlay sinks don't appear** — confirm the RAOP config is installed (`kast doctor`) and
   the speaker is on the same network.
 
+## Security
+
+`kast` runs entirely in your user session — there is no privileged daemon. Worth knowing:
+
+- **The AirPlay receiver is off by default.** It's a LAN-facing listener (`uxplay`) that
+  parses untrusted media, so turn it on (from the Kast tile) only while receiving, and off
+  when done. When on it is **PIN-gated**, but the PIN is a 4-digit speed bump — not strong
+  authentication, and it does not protect uxplay's parser. Off-when-idle is the real control.
+- Casting only **discovers** devices (Chromecast via mDNS, Miracast via Wi-Fi P2P) and never
+  auto-connects; selecting one hands off to `gnome-network-displays`. Discovered device names
+  are treated as untrusted and only ever reach `jq`/labels as text.
+- `~/.config/kast/uxplay.conf` is sourced by the CLI (like a shell rc file); the preferences
+  dialog escapes everything it writes there.
+- `install.sh` and `kast update` fetch over HTTPS from GitHub, and each release publishes a
+  `.sha256` for manual verification.
+
+Found a vulnerability? Please report it privately via the repository's **Security** tab —
+details in [SECURITY.md](SECURITY.md).
+
 ## Status & Roadmap
 
 What is real today:
