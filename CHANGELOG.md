@@ -3,6 +3,95 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-29
+
+Kast becomes a glue layer across casting protocols, not just a launcher.
+
+### Added
+- **AirPlay video out** (Apple TV / AirPlay-2 TVs) via pyatv: `kast airplay-targets`,
+  `kast airplay-cast <target> <url-or-file>` (URL or local file), `kast airplay-pick <target>`
+  (graphical file chooser), and `kast airplay-pair <target> [--gui]` for receivers that require
+  a code (`--gui` prompts for the PIN with a zenity dialog).
+- **One-click display connect.** With `gnome-network-displays` ≥ 0.99.0 (which ships a D-Bus
+  daemon), `kast connect <name>` / `kast display-connect <name>` connect straight to a
+  Chromecast or Miracast sink via `StartStream`, and `kast disconnect` stops it — no GUI
+  detour. Falls back to the picker when the daemon is absent or still discovering.
+- **Live cast state.** `kast status --json` reports `outbound.cast` (active/target/unit) by
+  tracking the transient stream unit; the tile shows "Casting · <target>" and offers Disconnect
+  only while a stream is live.
+- **Control center** (`kast control`): a backend-agnostic device control layer. Capabilities
+  are discovered per device, never assumed — an AirPlay-only TV exposes ~stop+volume, an Apple
+  TV the full remote (transport, nav, power, now-playing, apps). `kast control` lists
+  controllable devices with their capabilities; `kast control <target> <action>` runs a
+  normalized action (stop/play/pause/next/previous/seek/volume_up/volume_down/set_volume/
+  power_on/power_off/key/launch_app); `kast control <target> now-playing` reports playback.
+  Unsupported actions are refused with a clear message rather than a silent no-op. A
+  gnd screen-mirror session is controllable only as stop (= disconnect).
+- **Control Center window** (`kast control-center [target]`): a GTK4/Adwaita remote that
+  renders only the controls a device supports — now-playing, transport, a volume slider, a
+  d-pad, and power, each shown per the device's reported capabilities. The Kast tile gains a
+  **Control** section with quick controls (stop / play-pause / volume / power) per controllable
+  device and a **Control Center…** link to the full window.
+- **AirPlay audio receiver** (`shairport-sync`): the box can now receive AirPlay *audio*
+  (lossless, with metadata) in addition to uxplay's screen mirroring. New `audio-receiver-*`
+  commands and an "AirPlay Receiver (audio)" toggle in the tile; off by default like the screen
+  receiver. The packaged build is AirPlay audio (classic) — AirPlay-2 multi-room needs nqptp,
+  which Ubuntu does not package.
+- **YouTube receiver**: a small Node app (`yt-cast-receiver`) lets phone YouTube / YT-Music apps
+  cast to the box over DIAL — no Google Cast auth needed — and plays the stream with `mpv`.
+  New `youtube-receiver-*` commands and a "YouTube Receiver" tile toggle; off by default. Needs
+  Node + mpv + yt-dlp (expect occasional yt-dlp updates as YouTube changes).
+- The receiver matrix is now explicit: Miracast sink and Chromecast-receive are intentionally
+  **not** included (the only Linux Miracast sink is unreliable; Google Cast receive requires a
+  device key/cert a third party cannot obtain) — see the README Scope.
+- **Chromecast file-cast parity** (`catt`): `kast cast-file <target> <url-or-file>` plays a file
+  or URL on a Chromecast (mirroring the AirPlay file-cast), and `kast connect <chromecast> <media>`
+  casts the file while `kast connect <chromecast>` still mirrors the screen. The tile gains a
+  "cast file…" action per Chromecast (alongside "mirror screen"). Uses `catt` (pipx-isolated).
+- **Miracast in the picker.** `kast pick` now offers "Scan for Miracast displays…" and lists
+  found sinks for one-click connect (`kast pick --miracast` scans directly), so the graphical
+  picker covers all three display protocols, not just Chromecast/AirPlay.
+- **`kast repair`** reinstalls the pipx helpers (pyatv/catt) when a Python/OS upgrade breaks
+  their venvs; AirPlay commands also self-heal a broken pyatv venv automatically before failing.
+- **Tiered dependencies.** The core install stays lean (casting out, AirPlay screen receive, the
+  picker, and pipx-isolated pyatv + catt for AirPlay-out / Chromecast file-cast / control center).
+  Heavier receivers are opt-in: `./install.sh --with-airplay-audio` (shairport-sync),
+  `--with-youtube` (nodejs/npm/mpv/yt-dlp), or `--with-all`. Each feature degrades gracefully and
+  `kast doctor` names the missing piece.
+- **Unified cast surface:** `kast targets [--json]` lists every discovered target (Chromecast +
+  AirPlay) tagged with its capabilities, and `kast connect` routes each to the right backend.
+- The Kast tile now lists AirPlay receivers (each with **cast file…** and **pair…** actions)
+  and connects to Chromecast/Miracast in one click.
+
+### Changed
+- **Tile menu redesigned for usability.** Instead of one long flat list, the menu is now lean
+  with progressive disclosure: a contextual "Casting · X" + Disconnect (only while streaming),
+  two collapsible groups — **Cast to…** (discovered Chromecast/AirPlay/Miracast targets) and
+  **Receive** (the screen/audio/YouTube on/off switches) — plus **Control Center…** and **Kast
+  Settings…**. All configuration (receiver names, mirror mode, H.265, PIN, Wi-Fi behaviour) moved
+  into the preferences dialog; audio-output routing is left to GNOME's native Sound menu. Clicking
+  the tile opens the graphical picker.
+- Clicking a discovered Chromecast/Miracast in the tile now **connects** instead of opening
+  the GUI picker.
+- **`kast pick` is kast's own graphical "cast to…" menu** (a zenity list of discovered
+  Chromecast/AirPlay targets, a Disconnect entry when streaming, and a hand-off to the GUI
+  picker for Miracast). The app launcher and the `Super+K` shortcut now open it instead of
+  launching `gnome-network-displays` directly. It works regardless of GNOME shell version, so
+  it keeps working even when a shell upgrade temporarily disables the Quick Settings tile.
+- The Quick Settings extension now supports **GNOME Shell 50** (Ubuntu 26.04) as well as 49.
+
+### Fixed
+- The desktop launcher ran `gnome-network-displays` directly (its menu, not kast's); it now
+  runs `kast pick`. `kast doctor` flags the tile as out of date when the running GNOME is
+  newer than the extension's `shell-version`, and confirms the `kast pick` picker is available.
+- AirPlay is driven through the pyatv **library** (a small `kast-airplay` helper) instead of
+  pyatv's `atvremote`/`atvscript` console scripts, which crash on Python 3.14 (the removed
+  `asyncio.get_event_loop()` fallback). `kast doctor` now flags a pyatv venv broken by a
+  Python upgrade and points at `pipx reinstall pyatv`.
+- mDNS device names now decode avahi's `\DDD` escapes (so `Samsung Q70 Series (75)` and
+  accented names render correctly) while still refusing to decode control bytes — a hostile
+  name cannot inject ESC/newline/tab.
+
 ## [0.2.0] - 2026-05-21
 
 ### Added
@@ -103,6 +192,7 @@ Initial release. A Win+K-style cast panel for GNOME on Ubuntu 25.10.
 - `gnome-network-displays` exposes no connect API, so kast discovers and lists cast
   targets but hands off to its picker to complete the connection.
 
+[0.3.0]: https://github.com/asuramaya/kast/releases/tag/v0.3.0
 [0.2.0]: https://github.com/asuramaya/kast/releases/tag/v0.2.0
 [0.1.3]: https://github.com/asuramaya/kast/releases/tag/v0.1.3
 [0.1.2]: https://github.com/asuramaya/kast/releases/tag/v0.1.2

@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Kast Display Cast
-Comment=Launch the Ubuntu display casting UI
-Exec=gnome-network-displays
+Name=Kast
+Comment=Cast a screen or video to Chromecast, Miracast, or AirPlay
+Exec=kast pick
 Icon=video-display-symbolic
 Terminal=false
 Categories=AudioVideo;Network;GNOME;

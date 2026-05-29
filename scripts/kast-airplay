@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""kast AirPlay helper.
+
+Drives pyatv as a library rather than via its `atvremote`/`atvscript` console
+scripts: those call asyncio.get_event_loop() at startup, which raises on
+Python 3.14 (the no-running-loop fallback was removed). The library itself is
+fine under asyncio.run(), so kast talks to it directly through this helper.
+
+Invoked by the `kast` CLI with the pyatv venv's Python. Subcommands:
+  scan  [timeout]                  -> JSON list of AirPlay receivers
+  play  <address> <url>  [storage] -> have the receiver fetch and play a URL
+  stream <address> <file> [storage]-> push a local file to the receiver
+  pair  <address> [storage] [--gui]-> pair (PIN) and persist credentials
+  caps  <address> [storage]        -> JSON of the normalized controls this device supports
+  nowplaying <address> [storage]   -> JSON of what is currently playing
+  cmd   <address> <action> [arg] [storage] -> run one normalized control action
+
+`caps`/`cmd` speak a backend-agnostic control vocabulary (stop, play, pause,
+play_pause, next, previous, seek, volume_up, volume_down, set_volume, power_on,
+power_off, key:<name>, launch_app) so the kast control center can render only the
+controls a given device actually reports — an AirPlay-only TV exposes ~stop+volume,
+an Apple TV the full remote.
+"""
+import asyncio
+import json
+import sys
+
+import pyatv
+from pyatv.const import FeatureName, FeatureState, Protocol
+from pyatv.storage.file_storage import FileStorage
+
+
+# Normalized control name -> the pyatv FeatureName that gates it. The control
+# center asks for these by their normalized names; we never assume a device has
+# any of them (a Roku/Samsung AirPlay TV has almost none, an Apple TV has all).
+CAP_FEATURES = {
+    "stop": "Stop",
+    "play": "Play",
+    "pause": "Pause",
+    "play_pause": "PlayPause",
+    "next": "Next",
+    "previous": "Previous",
+    "seek": "SetPosition",
+    "volume_up": "VolumeUp",
+    "volume_down": "VolumeDown",
+    "set_volume": "SetVolume",
+    "power_on": "TurnOn",
+    "power_off": "TurnOff",
+    "now_playing": "Title",
+    "apps": "LaunchApp",
+}
+NAV_KEYS = ("up", "down", "left", "right", "select", "menu", "home", "top_menu")
+
+
+def _fail(msg):
+    print(f"kast-airplay: {msg}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+async def _storage(loop, path):
+    if not path:
+        return None
+    store = FileStorage(path, loop)
+    await store.load()
+    return store
+
+
+async def _find(loop, address, store):
+    confs = await pyatv.scan(loop, hosts=[address], timeout=5, storage=store)
+    if not confs:
+        _fail(f"no AirPlay device reachable at {address}")
+    return confs[0]
+
+
+async def _close(atv):
+    # close() returns the set of teardown tasks; await them so aiohttp doesn't
+    # warn about an unclosed client session when the loop shuts down.
+    tasks = atv.close()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def do_scan(timeout):
+    loop = asyncio.get_running_loop()
+    confs = await pyatv.scan(loop, timeout=timeout)
+    out = []
+    for conf in confs:
+        protocols = {svc.protocol.name.lower() for svc in conf.services}
+        if "airplay" in protocols:
+            out.append({
+                "name": conf.name,
+                "address": str(conf.address),
+                "identifier": conf.identifier,
+                "protocol": "airplay",
+            })
+    print(json.dumps(out))
+
+
+async def do_cast(address, media, storage_path, as_file):
+    loop = asyncio.get_running_loop()
+    store = await _storage(loop, storage_path)
+    conf = await _find(loop, address, store)
+    atv = await pyatv.connect(conf, loop, storage=store)
+    try:
+        if as_file:
+            await atv.stream.stream_file(media)
+        else:
+            await atv.stream.play_url(media)
+    finally:
+        await _close(atv)
+
+
+def _prompt_pin(gui):
+    # The receiver shows the PIN only after begin(), so this is called then.
+    prompt = "Enter the PIN shown on the receiver:"
+    if gui:
+        import subprocess
+        try:
+            res = subprocess.run(
+                ["zenity", "--entry", "--title=Kast — AirPlay pairing",
+                 f"--text={prompt}"],
+                capture_output=True, text=True)
+        except FileNotFoundError:
+            _fail("zenity not found for the PIN prompt; pair from a terminal instead")
+        if res.returncode != 0:
+            _fail("pairing cancelled")
+        return res.stdout.strip()
+    return input(f"{prompt} ").strip()
+
+
+async def do_pair(address, storage_path, gui=False):
+    loop = asyncio.get_running_loop()
+    store = await _storage(loop, storage_path)
+    conf = await _find(loop, address, store)
+    handler = await pyatv.pair(conf, Protocol.AirPlay, loop, storage=store)
+    await handler.begin()
+    try:
+        if not handler.device_provides_pin:
+            _fail("this receiver expects a PIN on its own screen; not supported")
+        handler.pin(_prompt_pin(gui))
+        await handler.finish()
+        if not handler.has_paired:
+            _fail("pairing did not complete")
+        if store is not None:
+            await store.save()
+        print("Paired — credentials saved.")
+    finally:
+        await handler.close()
+
+
+def _feature_available(atv, feature_name):
+    fn = getattr(FeatureName, feature_name, None)
+    if fn is None:
+        return False
+    try:
+        return atv.features.get_feature(fn).state == FeatureState.Available
+    except Exception:
+        return False
+
+
+async def do_caps(address, storage_path):
+    loop = asyncio.get_running_loop()
+    store = await _storage(loop, storage_path)
+    conf = await _find(loop, address, store)
+    atv = await pyatv.connect(conf, loop, storage=store)
+    try:
+        caps = {name: _feature_available(atv, feat)
+                for name, feat in CAP_FEATURES.items()}
+        # Directional/menu keys: available iff the remote-control nav is present.
+        caps["nav"] = _feature_available(atv, "Up") or _feature_available(atv, "Select")
+        caps["volume"] = _feature_available(atv, "Volume")
+    finally:
+        await _close(atv)
+    print(json.dumps(caps))
+
+
+async def do_nowplaying(address, storage_path):
+    loop = asyncio.get_running_loop()
+    store = await _storage(loop, storage_path)
+    conf = await _find(loop, address, store)
+    atv = await pyatv.connect(conf, loop, storage=store)
+    out = {"title": None, "artist": None, "album": None, "app": None,
+           "state": None, "position": None, "total": None}
+    try:
+        if _feature_available(atv, "Title") or _feature_available(atv, "PlayPause"):
+            playing = await atv.metadata.playing()
+            out.update({
+                "title": playing.title,
+                "artist": playing.artist,
+                "album": playing.album,
+                "state": playing.device_state.name if playing.device_state else None,
+                "position": playing.position,
+                "total": playing.total_time,
+            })
+        try:
+            out["app"] = atv.metadata.app.name if atv.metadata.app else None
+        except Exception:
+            pass
+    finally:
+        await _close(atv)
+    print(json.dumps(out))
+
+
+# action -> the FeatureName that must be Available for it to work. `key` is
+# resolved per nav key below.
+ACTION_FEATURE = {
+    "stop": "Stop", "play": "Play", "pause": "Pause", "play_pause": "PlayPause",
+    "next": "Next", "previous": "Previous", "seek": "SetPosition",
+    "volume_up": "VolumeUp", "volume_down": "VolumeDown", "set_volume": "SetVolume",
+    "power_on": "TurnOn", "power_off": "TurnOff", "launch_app": "LaunchApp",
+}
+
+
+async def do_cmd(address, action, arg, storage_path):
+    loop = asyncio.get_running_loop()
+    store = await _storage(loop, storage_path)
+    conf = await _find(loop, address, store)
+    atv = await pyatv.connect(conf, loop, storage=store)
+    # Errors are recorded and raised AFTER a clean close, so a refused action
+    # never leaks an unclosed client session.
+    error = None
+    try:
+        rc = atv.remote_control
+        if action == "key" and arg not in NAV_KEYS:
+            error = f"unknown key: {arg} (one of {', '.join(NAV_KEYS)})"
+        else:
+            # Refuse actions this device doesn't actually support rather than
+            # firing a silent no-op. key:<name> -> capitalized FeatureName.
+            feat = ACTION_FEATURE.get(action)
+            if action == "key":
+                feat = "".join(p.capitalize() for p in arg.split("_"))
+            if feat and not _feature_available(atv, feat):
+                error = (f"'{action}{(':' + arg) if action == 'key' else ''}' "
+                         f"is not available on {conf.name}")
+            elif action == "stop":
+                await rc.stop()
+            elif action == "play":
+                await rc.play()
+            elif action == "pause":
+                await rc.pause()
+            elif action == "play_pause":
+                await rc.play_pause()
+            elif action == "next":
+                await rc.next()
+            elif action == "previous":
+                await rc.previous()
+            elif action == "seek":
+                await rc.set_position(int(arg or 0))
+            elif action == "volume_up":
+                await atv.audio.volume_up()
+            elif action == "volume_down":
+                await atv.audio.volume_down()
+            elif action == "set_volume":
+                await atv.audio.set_volume(float(arg))
+            elif action == "power_on":
+                await atv.power.turn_on()
+            elif action == "power_off":
+                await atv.power.turn_off()
+            elif action == "launch_app":
+                await atv.apps.launch_app(arg)
+            elif action == "key":
+                await getattr(rc, arg)()
+            else:
+                error = f"unknown action: {action}"
+    finally:
+        await _close(atv)
+    if error:
+        _fail(error)
+
+
+def main(argv):
+    if not argv:
+        _fail("missing subcommand")
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "scan":
+        timeout = int(rest[0]) if rest else 5
+        asyncio.run(do_scan(timeout))
+    elif cmd in ("play", "stream"):
+        if len(rest) < 2:
+            _fail(f"usage: kast-airplay {cmd} <address> <media> [storage]")
+        address, media = rest[0], rest[1]
+        storage_path = rest[2] if len(rest) > 2 else None
+        asyncio.run(do_cast(address, media, storage_path, as_file=(cmd == "stream")))
+    elif cmd == "pair":
+        gui = "--gui" in rest
+        rest = [r for r in rest if r != "--gui"]
+        if not rest:
+            _fail("usage: kast-airplay pair <address> [storage] [--gui]")
+        address = rest[0]
+        storage_path = rest[1] if len(rest) > 1 else None
+        asyncio.run(do_pair(address, storage_path, gui))
+    elif cmd == "caps":
+        if not rest:
+            _fail("usage: kast-airplay caps <address> [storage]")
+        asyncio.run(do_caps(rest[0], rest[1] if len(rest) > 1 else None))
+    elif cmd == "nowplaying":
+        if not rest:
+            _fail("usage: kast-airplay nowplaying <address> [storage]")
+        asyncio.run(do_nowplaying(rest[0], rest[1] if len(rest) > 1 else None))
+    elif cmd == "cmd":
+        # Fixed arity to avoid arg/storage ambiguity: <address> <action> <arg> <storage>,
+        # where arg and storage may be empty strings (kast always passes all four).
+        if len(rest) < 2:
+            _fail("usage: kast-airplay cmd <address> <action> <arg> <storage>")
+        address, action = rest[0], rest[1]
+        arg = (rest[2] if len(rest) > 2 else "") or None
+        storage_path = (rest[3] if len(rest) > 3 else "") or None
+        asyncio.run(do_cmd(address, action, arg, storage_path))
+    else:
+        _fail(f"unknown subcommand: {cmd}")
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except KeyboardInterrupt:
+        raise SystemExit(130)

@@ -39,8 +39,10 @@ function dim(text) {
     return new PopupMenu.PopupMenuItem(text, {reactive: false, can_focus: false});
 }
 
-// A single "Kast" tile holding both casting (outbound) and the AirPlay receiver
-// (inbound). The pill opens the cast picker; the ⌄ menu has everything.
+// One "Kast" tile. The menu is intentionally lean: a contextual casting status,
+// two collapsible groups (Cast to… / Receive) for the dynamic lists, and links
+// to the Control Center window and the preferences dialog. All configuration
+// (receiver names, mode, PIN, Wi-Fi behaviour) lives in preferences, not here.
 const KastToggle = GObject.registerClass(
 class KastToggle extends QuickMenuToggle {
     _init(onPrefs) {
@@ -53,93 +55,115 @@ class KastToggle extends QuickMenuToggle {
         this._onPrefs = onPrefs;
         this.menu.setHeader('video-display-symbolic', 'Kast', 'Cast & AirPlay');
 
-        // --- Cast (static actions) ---
-        const castActions = new PopupMenu.PopupMenuSection();
-        castActions.addMenuItem(dim('Cast'));
-        castActions.addAction('Display Cast…', () => runKast(['open-display-cast']));
-        castActions.addAction('Miracast (drops Wi-Fi)…', () => runKast(['open-display-cast', '--drop-wifi']));
-        this.menu.addMenuItem(castActions);
+        // Contextual: shown only while a display stream is live.
+        this._statusSection = new PopupMenu.PopupMenuSection();
+        this.menu.addMenuItem(this._statusSection);
 
-        // --- Cast targets (dynamic) ---
-        this._castSection = new PopupMenu.PopupMenuSection();
-        this.menu.addMenuItem(this._castSection);
+        // Cast to… — collapsible list of discovered targets.
+        this._castMenu = new PopupMenu.PopupSubMenuMenuItem('Cast to…', true);
+        this._castMenu.icon.icon_name = 'video-display-symbolic';
+        this.menu.addMenuItem(this._castMenu);
 
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        // --- Receiver (dynamic) ---
-        this._receiverSection = new PopupMenu.PopupMenuSection();
-        this.menu.addMenuItem(this._receiverSection);
+        // Receive — collapsible on/off switches for the inbound receivers.
+        this._receiverMenu = new PopupMenu.PopupSubMenuMenuItem('Receive', true);
+        this._receiverMenu.icon.icon_name = 'audio-input-microphone-symbolic';
+        this.menu.addMenuItem(this._receiverMenu);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // --- Settings links (static) ---
-        const settings = new PopupMenu.PopupMenuSection();
-        settings.addAction('Sound Settings…', () => runKast(['open-sound']));
-        settings.addAction('Display Settings…', () => runKast(['open-display']));
-        settings.addAction('Kast Settings…', () => this._onPrefs?.());
-        this.menu.addMenuItem(settings);
+        // Static links: the full remote and all configuration live elsewhere.
+        this.menu.addAction('Control Center…', () => runKast(['control-center']));
+        this.menu.addAction('Kast Settings…', () => this._onPrefs?.());
 
-        // --- Footer: update + version (dynamic) ---
+        // Footer: version + optional update.
         this._footerSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._footerSection);
 
-        // Clicking the pill body opens the cast picker.
-        this.connect('clicked', () => runKast(['open-display-cast']));
+        // Clicking the pill opens the graphical picker.
+        this.connect('clicked', () => runKast(['pick']));
     }
 
     render(data) {
         const status = data.status ?? {};
-        const active = !!status.receiver?.active;
-        const mode = status.mirror_mode ?? 'mirror';
-        this.subtitle = active ? `Receiving · ${mode}` : 'Cast or receive';
+        const cast = status.outbound?.cast ?? {};
+        const anyRecv = status.receiver?.active || status.audio_receiver?.active ||
+            status.youtube_receiver?.active;
+        this.subtitle = cast.active
+            ? `Casting · ${cast.target ?? 'display'}`
+            : anyRecv ? 'Receiving' : 'Cast or receive';
+        this.checked = !!(cast.active || anyRecv);
 
+        this._renderStatus(cast);
         this._renderCast(data);
-        this._renderReceiver(status, active, mode);
+        this._renderReceivers(status);
         this._renderFooter(status, data.updateInfo);
     }
 
-    _renderCast({castTargets = [], miracastTargets = [], miracastScanning = false}) {
-        const s = this._castSection;
+    _renderStatus(cast) {
+        const s = this._statusSection;
         s.removeAll();
-        s.addMenuItem(dim(`Chromecast (${castTargets.length})`));
-        if (castTargets.length === 0)
-            s.addMenuItem(dim('No targets found'));
-        else
-            for (const t of castTargets)
-                s.addAction(t.name || t.address || 'Unknown device', () => runKast(['open-display-cast']));
-        s.addAction('Rescan Chromecast', () => this.onRescanCast?.());
-
-        s.addMenuItem(dim(`Miracast (${miracastTargets.length})`));
-        for (const t of miracastTargets)
-            s.addAction(t.name || t.hwaddr || 'Unknown display', () => runKast(['open-display-cast', '--drop-wifi']));
-        if (miracastScanning)
-            s.addMenuItem(dim('Scanning for Miracast displays…'));
-        else
-            s.addAction('Scan for Miracast displays', () => this.onScanMiracast?.());
+        if (cast.active) {
+            s.addMenuItem(dim(`Casting · ${cast.target ?? 'display'}`));
+            s.addAction('Disconnect', () => runKast(['disconnect']));
+            s.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        }
     }
 
-    _renderReceiver(status, active, mode) {
-        const s = this._receiverSection;
-        s.removeAll();
+    _renderCast(data) {
+        const {castTargets = [], airplayTargets = [], miracastTargets = [], miracastScanning = false} = data;
+        const canFile = !!data.status?.outbound?.chromecast_filecast;
+        const m = this._castMenu.menu;
+        m.removeAll();
 
-        const toggle = new PopupMenu.PopupSwitchMenuItem('AirPlay Receiver', active);
-        toggle.connect('toggled', (_item, state) => runKast([state ? 'receiver-start' : 'receiver-stop']));
-        s.addMenuItem(toggle);
+        const total = castTargets.length + airplayTargets.length + miracastTargets.length;
+        this._castMenu.label.text = total ? `Cast to… (${total})` : 'Cast to…';
 
-        s.addMenuItem(dim('Mode'));
-        for (const [label, value] of [['Mirror', 'mirror'], ['Video Overlay', 'video-overlay']])
-            s.addAction(`${mode === value ? '●  ' : '    '}${label}`, () => runKast(['set-mode', value]));
+        if (castTargets.length) {
+            m.addMenuItem(dim('Chromecast'));
+            for (const t of castTargets) {
+                const name = t.name || t.address || 'Device';
+                m.addAction(`${name} — mirror screen`, () => runKast(['display-connect', name]));
+                if (canFile)
+                    m.addAction(`${name} — cast file…`, () => runKast(['cast-file-pick', name]));
+            }
+        }
+        if (airplayTargets.length) {
+            m.addMenuItem(dim('AirPlay'));
+            for (const t of airplayTargets) {
+                const ref = t.address || t.name;
+                m.addAction(`${t.name || ref || 'Receiver'} — cast file…`, () => runKast(['airplay-pick', ref]));
+            }
+        }
+        if (miracastTargets.length) {
+            m.addMenuItem(dim('Miracast'));
+            for (const t of miracastTargets)
+                m.addAction(t.name || t.hwaddr || 'Display', () => runKast(['display-connect', t.name || t.hwaddr || '']));
+        }
+        if (!total)
+            m.addMenuItem(dim('No devices found'));
 
-        s.addMenuItem(dim('AirPlay Output'));
-        const sinks = (status.outbound?.sinks ?? []).filter(sink => sink.raop);
-        if (sinks.length === 0)
-            s.addMenuItem(dim('No AirPlay outputs'));
-        else
-            for (const sink of sinks)
-                s.addAction(`${sink.default ? '●  ' : '    '}${sink.name}`, () => runKast(['select-sink', `${sink.id}`]));
-        s.addAction('Use Local Speakers', () => runKast(['select-local']));
+        m.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        m.addAction('Open picker…', () => runKast(['pick']));
+        m.addAction(miracastScanning ? 'Scanning for Miracast…' : 'Scan for Miracast', () => this.onScanMiracast?.());
+        m.addAction('Rescan', () => this.onRescanCast?.());
+    }
 
-        s.addAction('Restart Receiver', () => runKast(['receiver-restart']));
+    _renderReceivers(status) {
+        const m = this._receiverMenu.menu;
+        m.removeAll();
+        const addSwitch = (label, active, startCmd, stopCmd) => {
+            const item = new PopupMenu.PopupSwitchMenuItem(label, !!active);
+            item.connect('toggled', (_i, state) => runKast([state ? startCmd : stopCmd]));
+            m.addMenuItem(item);
+        };
+        addSwitch('AirPlay — screen', status.receiver?.active, 'receiver-start', 'receiver-stop');
+        if (status.audio_receiver?.installed)
+            addSwitch('AirPlay — audio', status.audio_receiver?.active, 'audio-receiver-start', 'audio-receiver-stop');
+        if (status.youtube_receiver?.installed)
+            addSwitch('YouTube', status.youtube_receiver?.active, 'youtube-receiver-start', 'youtube-receiver-stop');
+
+        const anyOn = status.receiver?.active || status.audio_receiver?.active || status.youtube_receiver?.active;
+        this._receiverMenu.label.text = anyOn ? 'Receive · on' : 'Receive';
     }
 
     _renderFooter(status, updateInfo) {
@@ -156,10 +180,10 @@ class KastIndicator extends SystemIndicator {
     _init(onPrefs) {
         super._init();
 
-        this._data = {status: null, castTargets: [], miracastTargets: [], miracastScanning: false, updateInfo: null};
+        this._data = {status: null, castTargets: [], miracastTargets: [], miracastScanning: false, airplayTargets: [], updateInfo: null};
 
         this._toggle = new KastToggle(onPrefs);
-        this._toggle.onRescanCast = () => this._discoverCastTargets();
+        this._toggle.onRescanCast = () => { this._discoverCastTargets(); this._discoverAirplayTargets(); };
         this._toggle.onScanMiracast = () => this._scanMiracast();
         this.quickSettingsItems.push(this._toggle);
 
@@ -170,6 +194,8 @@ class KastIndicator extends SystemIndicator {
         });
         this._discoverCastTargets();
         this._castTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 20, () => this._discoverCastTargets());
+        this._discoverAirplayTargets();
+        this._airplayTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 20, () => this._discoverAirplayTargets());
         this._checkUpdate();
         this._updateTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 6 * 3600, () => this._checkUpdate());
     }
@@ -189,6 +215,16 @@ class KastIndicator extends SystemIndicator {
         readKastJson(['cast-targets', '--json'], targets => {
             if (Array.isArray(targets)) {
                 this._data.castTargets = targets;
+                this._render();
+            }
+        });
+        return GLib.SOURCE_CONTINUE;
+    }
+
+    _discoverAirplayTargets() {
+        readKastJson(['airplay-targets', '--json'], targets => {
+            if (Array.isArray(targets)) {
+                this._data.airplayTargets = targets;
                 this._render();
             }
         });
@@ -219,11 +255,11 @@ class KastIndicator extends SystemIndicator {
     }
 
     destroy() {
-        for (const id of [this._statusTimer, this._castTimer, this._updateTimer]) {
+        for (const id of [this._statusTimer, this._castTimer, this._airplayTimer, this._updateTimer]) {
             if (id)
                 GLib.source_remove(id);
         }
-        this._statusTimer = this._castTimer = this._updateTimer = 0;
+        this._statusTimer = this._castTimer = this._airplayTimer = this._updateTimer = 0;
         this.quickSettingsItems.forEach(item => item.destroy());
         super.destroy();
     }

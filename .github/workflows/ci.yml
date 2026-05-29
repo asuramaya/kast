@@ -17,8 +17,13 @@ jobs:
       - name: ShellCheck
         run: shellcheck install.sh uninstall.sh scripts/kast
 
+      - name: Python helpers (syntax)
+        run: python3 -m py_compile scripts/kast-airplay scripts/kast-control-center
+
       - name: Shell extension (syntax)
-        run: node --check "shell-extension/kast@asuramaya/extension.js"
+        run: |
+          node --check "shell-extension/kast@asuramaya/extension.js"
+          node --check "shell-extension/kast@asuramaya/prefs.js"
 
       - name: Shell extension metadata (valid JSON)
         run: python3 -c "import json; json.load(open('shell-extension/kast@asuramaya/metadata.json'))"
@@ -27,3 +32,4 @@ jobs:
         run: |
           bash scripts/kast version
           bash scripts/kast --help
+          bash scripts/kast --help | grep -q airplay-cast

@@ -1,0 +1,12 @@
+{
+  "name": "kast-youtube-receiver",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "YouTube/YT-Music DIAL receiver for kast — plays cast videos locally via mpv.",
+  "main": "index.mjs",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "yt-cast-receiver": "^2.1.0"
+  }
+}

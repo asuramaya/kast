@@ -1,6 +1,7 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
@@ -20,10 +21,14 @@ function readConf() {
         // No config yet — fall back to defaults below.
     }
     const name = (text.match(/UXPLAY_NAME="([^"]*)"/) || [, 'Kast Receiver'])[1];
+    const audioName = (text.match(/SHAIRPORT_NAME="([^"]*)"/) || [, 'Kast Audio'])[1];
+    const ytName = (text.match(/YT_RECEIVER_NAME="([^"]*)"/) || [, 'Kast YouTube'])[1];
     const argsRaw = (text.match(/UXPLAY_ARGS=\(([^)]*)\)/) || [, ''])[1];
     const tokens = argsRaw.trim().split(/\s+/).filter(t => t.length > 0);
     return {
         name,
+        audioName,
+        ytName,
         tokens,
         h265: tokens.includes('-h265'),
         pin: tokens.includes('-pin'),
@@ -74,6 +79,8 @@ function writeConf(state) {
         '',
         `UXPLAY_NAME="${sanitizeName(state.name)}"`,
         `UXPLAY_ARGS=(${args.join(' ')})`,
+        `SHAIRPORT_NAME="${sanitizeName(state.audioName)}"`,
+        `YT_RECEIVER_NAME="${sanitizeName(state.ytName)}"`,
         `KAST_DROP_WIFI_DEFAULT=${state.dropWifi ? 1 : 0}`,
         '',
     ].join('\n');
@@ -82,6 +89,27 @@ function writeConf(state) {
         GLib.file_set_contents(CONF_PATH, new TextEncoder().encode(text));
     } catch (e) {
         logError(e, 'kast prefs: failed to write config');
+    }
+}
+
+// Mirror mode lives in kast's state (not the conf), so read/write it via the CLI.
+function getMode() {
+    try {
+        const [ok, out] = GLib.spawn_sync(null, [CLI_PATH, 'get-mode'], null,
+            GLib.SpawnFlags.DEFAULT, null);
+        if (ok)
+            return new TextDecoder().decode(out).trim() || 'mirror';
+    } catch (_e) {
+        // CLI missing — default below.
+    }
+    return 'mirror';
+}
+
+function runCli(args) {
+    try {
+        Gio.Subprocess.new([CLI_PATH, ...args], Gio.SubprocessFlags.NONE);
+    } catch (e) {
+        logError(e, 'kast prefs: CLI call failed');
     }
 }
 
@@ -96,11 +124,12 @@ export default class KastPreferences extends ExtensionPreferences {
         });
         window.add(page);
 
-        const receiver = new Adw.PreferencesGroup({
-            title: 'AirPlay Receiver',
-            description: 'Changes take effect when the receiver restarts.',
+        // --- AirPlay screen receiver (uxplay) ---
+        const screen = new Adw.PreferencesGroup({
+            title: 'AirPlay Receiver (screen)',
+            description: 'Receive screen mirroring from Apple devices. Changes apply on restart.',
         });
-        page.add(receiver);
+        page.add(screen);
 
         const nameRow = new Adw.EntryRow({title: 'Receiver name'});
         nameRow.text = state.name;
@@ -108,7 +137,18 @@ export default class KastPreferences extends ExtensionPreferences {
             state.name = nameRow.text;
             save();
         });
-        receiver.add(nameRow);
+        screen.add(nameRow);
+
+        const modeRow = new Adw.ComboRow({
+            title: 'Mode',
+            subtitle: 'How the received screen is shown',
+            model: Gtk.StringList.new(['Mirror', 'Video overlay (fullscreen)']),
+        });
+        modeRow.selected = getMode() === 'video-overlay' ? 1 : 0;
+        modeRow.connect('notify::selected', () => {
+            runCli(['set-mode', modeRow.selected === 1 ? 'video-overlay' : 'mirror']);
+        });
+        screen.add(modeRow);
 
         const h265Row = new Adw.SwitchRow({
             title: 'H.265 video',
@@ -119,7 +159,7 @@ export default class KastPreferences extends ExtensionPreferences {
             state.h265 = h265Row.active;
             save();
         });
-        receiver.add(h265Row);
+        screen.add(h265Row);
 
         const pinRow = new Adw.SwitchRow({
             title: 'Require PIN',
@@ -130,18 +170,43 @@ export default class KastPreferences extends ExtensionPreferences {
             state.pin = pinRow.active;
             save();
         });
-        receiver.add(pinRow);
+        screen.add(pinRow);
 
         const restartRow = new Adw.ButtonRow({title: 'Restart receiver to apply'});
-        restartRow.connect('activated', () => {
-            try {
-                Gio.Subprocess.new([CLI_PATH, 'receiver-restart'], Gio.SubprocessFlags.NONE);
-            } catch (e) {
-                logError(e, 'kast prefs: receiver restart failed');
-            }
-        });
-        receiver.add(restartRow);
+        restartRow.connect('activated', () => runCli(['receiver-restart']));
+        screen.add(restartRow);
 
+        // --- AirPlay audio receiver (shairport-sync) ---
+        const audio = new Adw.PreferencesGroup({
+            title: 'AirPlay Receiver (audio)',
+            description: 'Receive AirPlay audio. Available when shairport-sync is installed.',
+        });
+        page.add(audio);
+
+        const audioNameRow = new Adw.EntryRow({title: 'Audio receiver name'});
+        audioNameRow.text = state.audioName;
+        audioNameRow.connect('changed', () => {
+            state.audioName = audioNameRow.text;
+            save();
+        });
+        audio.add(audioNameRow);
+
+        // --- YouTube receiver ---
+        const yt = new Adw.PreferencesGroup({
+            title: 'YouTube Receiver',
+            description: 'Receive casts from phone YouTube / YT-Music apps (needs node + mpv).',
+        });
+        page.add(yt);
+
+        const ytNameRow = new Adw.EntryRow({title: 'YouTube receiver name'});
+        ytNameRow.text = state.ytName;
+        ytNameRow.connect('changed', () => {
+            state.ytName = ytNameRow.text;
+            save();
+        });
+        yt.add(ytNameRow);
+
+        // --- Casting (outbound) ---
         const casting = new Adw.PreferencesGroup({title: 'Casting'});
         page.add(casting);
 

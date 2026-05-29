@@ -10,6 +10,13 @@ UXPLAY_NAME="Kast Receiver"
 # Other examples: UXPLAY_ARGS=(-h265 -pin)
 UXPLAY_ARGS=(-pin)
 
+# Name advertised by the AirPlay AUDIO receiver (shairport-sync), separate from
+# the screen-mirroring receiver above.
+SHAIRPORT_NAME="Kast Audio"
+
+# Extra arguments forwarded to shairport-sync, e.g. SHAIRPORT_ARGS=(-v).
+SHAIRPORT_ARGS=()
+
 # Make "Display Cast…" drop Wi-Fi by default (1) or keep it (0). Needed for
 # Miracast on single-radio adapters. Editable from Kast preferences.
 KAST_DROP_WIFI_DEFAULT=0

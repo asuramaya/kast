@@ -32,7 +32,7 @@ note() { printf '%s\n' "$*"; }
 
 stop_services() {
     # Current kast units plus any legacy ctrlk-cast units from before the rename.
-    local units=(kast-tray.service uxplay.service uxplay-window-controller.service ctrlk-cast-tray.service)
+    local units=(kast-tray.service uxplay.service shairport-sync.service kast-youtube.service uxplay-window-controller.service ctrlk-cast-tray.service)
     systemctl --user disable --now "${units[@]}" >/dev/null 2>&1 || true
 }
 
@@ -70,10 +70,13 @@ PY
 }
 
 remove_files() {
-    rm -f "${BIN_DIR}/kast" "${BIN_DIR}/kast-tray"
+    rm -f "${BIN_DIR}/kast" "${BIN_DIR}/kast-tray" \
+          "${BIN_DIR}/kast-airplay" "${BIN_DIR}/kast-control-center"
     rm -f "${BIN_DIR}/ctrlk-cast" "${BIN_DIR}/ctrlk-cast-tray"
     rm -f "${CONFIG_HOME}/systemd/user/kast-tray.service" \
           "${CONFIG_HOME}/systemd/user/uxplay.service" \
+          "${CONFIG_HOME}/systemd/user/shairport-sync.service" \
+          "${CONFIG_HOME}/systemd/user/kast-youtube.service" \
           "${CONFIG_HOME}/systemd/user/uxplay-window-controller.service" \
           "${CONFIG_HOME}/systemd/user/ctrlk-cast-tray.service"
     rm -f "${DATA_HOME}/applications/kast-center.desktop" \

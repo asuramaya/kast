@@ -2,13 +2,29 @@
 set -euo pipefail
 
 APP_ID="kast"
-KAST_VERSION="0.2.0"
+KAST_VERSION="0.3.0"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONF_FILE="${CONFIG_HOME}/${APP_ID}/uxplay.conf"
 MODE_FILE="${STATE_HOME}/${APP_ID}/display-mode"
 WIFI_STATE_FILE="${STATE_HOME}/${APP_ID}/wifi-connection"
+# pyatv keeps paired AirPlay credentials here; airplay-cast auto-loads them.
+PYATV_STORAGE="${STATE_HOME}/${APP_ID}/pyatv-storage"
+# AirPlay is driven through a small Python helper next to this script (pyatv's
+# own atvremote/atvscript CLIs crash on Python 3.14). Resolve it relative to the
+# real script location so it works both from the repo and once installed.
+KAST_LIBDIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "$0")")" && pwd)"
+AIRPLAY_HELPER="${KAST_LIBDIR}/kast-airplay"
+CONTROL_CENTER="${KAST_LIBDIR}/kast-control-center"
+# gnome-network-displays daemon (>=0.99.0) exposes a D-Bus connect API, so kast
+# can do one-click Chromecast/Miracast streaming instead of just opening the GUI.
+GND_DAEMON_BIN="gnome-network-displays-daemon"
+GND_DEST="org.gnome.NetworkDisplays.Daemon"
+GND_OBJ="/org/gnome/NetworkDisplays/Manager"
+GND_IFACE="org.gnome.NetworkDisplays.Manager"
+GND_STREAM_FILE="${STATE_HOME}/${APP_ID}/gnd-stream-unit"
 
 die() {
     printf '%s\n' "$*" >&2
@@ -22,12 +38,18 @@ need() {
 load_conf() {
     UXPLAY_NAME="Kast Receiver"
     UXPLAY_ARGS=()
+    SHAIRPORT_NAME="Kast Audio"
+    SHAIRPORT_ARGS=()
+    YT_RECEIVER_NAME="Kast YouTube"
     if [[ -f "${CONF_FILE}" ]]; then
         # shellcheck disable=SC1090
         source "${CONF_FILE}"
     fi
     if ! declare -p UXPLAY_ARGS >/dev/null 2>&1; then
         UXPLAY_ARGS=()
+    fi
+    if ! declare -p SHAIRPORT_ARGS >/dev/null 2>&1; then
+        SHAIRPORT_ARGS=()
     fi
 }
 
@@ -167,6 +189,8 @@ status_json() {
     local receiver_enabled="false"
     local display_installed="false"
     local uxplay_installed="false"
+    local audio_active="false"
+    local audio_installed="false"
     local sinks_json="[]"
     local maybe_sinks
 
@@ -175,6 +199,19 @@ status_json() {
     fi
     if systemctl --user is-enabled --quiet uxplay.service 2>/dev/null; then
         receiver_enabled="true"
+    fi
+    if systemctl --user is-active --quiet shairport-sync.service 2>/dev/null; then
+        audio_active="true"
+    fi
+    if command -v shairport-sync >/dev/null 2>&1; then
+        audio_installed="true"
+    fi
+    local yt_active="false" yt_installed="false"
+    if systemctl --user is-active --quiet kast-youtube.service 2>/dev/null; then
+        yt_active="true"
+    fi
+    if [[ -f "${DATA_HOME}/${APP_ID}/youtube-receiver/index.mjs" ]] && find_node >/dev/null 2>&1 && command -v mpv >/dev/null 2>&1; then
+        yt_installed="true"
     fi
     if command -v gnome-network-displays >/dev/null 2>&1; then
         display_installed="true"
@@ -188,6 +225,9 @@ status_json() {
         fi
     fi
 
+    local cast_json
+    cast_json="$(cast_state_json 2>/dev/null || printf '{"active":false,"target":null,"unit":null}')"
+
     jq -n \
         --arg version "${KAST_VERSION}" \
         --arg receiver_name "${UXPLAY_NAME}" \
@@ -195,8 +235,16 @@ status_json() {
         --arg receiver_enabled "${receiver_enabled}" \
         --arg display_installed "${display_installed}" \
         --arg uxplay_installed "${uxplay_installed}" \
+        --arg audio_name "${SHAIRPORT_NAME:-Kast Audio}" \
+        --arg audio_active "${audio_active}" \
+        --arg audio_installed "${audio_installed}" \
+        --arg yt_name "${YT_RECEIVER_NAME:-Kast YouTube}" \
+        --arg yt_active "${yt_active}" \
+        --arg yt_installed "${yt_installed}" \
+        --arg catt_installed "$(have_catt && printf true || printf false)" \
         --arg mirror_mode "$(get_mode)" \
         --argjson sinks "${sinks_json}" \
+        --argjson cast "${cast_json}" \
         '{
             version: $version,
             receiver: {
@@ -205,10 +253,22 @@ status_json() {
                 enabled: ($receiver_enabled == "true"),
                 installed: ($uxplay_installed == "true")
             },
+            audio_receiver: {
+                name: $audio_name,
+                active: ($audio_active == "true"),
+                installed: ($audio_installed == "true")
+            },
+            youtube_receiver: {
+                name: $yt_name,
+                active: ($yt_active == "true"),
+                installed: ($yt_installed == "true")
+            },
             outbound: {
                 display_cast_installed: ($display_installed == "true"),
                 sinks: $sinks,
-                airplay_sink_count: ($sinks | map(select(.raop == true)) | length)
+                airplay_sink_count: ($sinks | map(select(.raop == true)) | length),
+                chromecast_filecast: ($catt_installed == "true"),
+                cast: $cast
             },
             mirror_mode: $mirror_mode
         }'
@@ -243,7 +303,7 @@ install_shortcut() {
     fi
 
     gsettings set "${binding_schema}" name "Kast"
-    gsettings set "${binding_schema}" command "${HOME}/.local/bin/kast open-display-cast"
+    gsettings set "${binding_schema}" command "${HOME}/.local/bin/kast pick"
     gsettings set "${binding_schema}" binding "${binding}"
 }
 
@@ -311,18 +371,37 @@ cast_targets_json() {
         return 0
     fi
     avahi-browse -rpt _googlecast._tcp 2>/dev/null \
-        | awk -F';' '
+        | LC_ALL=C awk -F';' '
+            function unesc(s,    out, i, c, code) {
+                # avahi -p escapes bytes as decimal \DDD. Decode printable/UTF-8
+                # bytes (>=32) to real bytes (LC_ALL=C keeps %c byte-exact so
+                # multibyte UTF-8 reassembles); leave control bytes (<32) escaped
+                # so a hostile mDNS name cannot inject ESC/newline/tab.
+                out = "";
+                for (i = 1; i <= length(s); i++) {
+                    c = substr(s, i, 1);
+                    if (c == "\\" && substr(s, i + 1, 3) ~ /^[0-9][0-9][0-9]$/) {
+                        code = substr(s, i + 1, 3) + 0;
+                        if (code >= 32) out = out sprintf("%c", code);
+                        else            out = out "\\" substr(s, i + 1, 3);
+                        i += 3;
+                    } else {
+                        out = out c;
+                    }
+                }
+                return out;
+            }
             $1 == "=" && $3 == "IPv4" {
                 name = $4; addr = $8; port = $9; fn = "";
                 n = split($0, q, "\"");
                 for (i = 1; i <= n; i++) {
                     if (q[i] ~ /^fn=/) { fn = substr(q[i], 4); break }
                 }
-                disp = (fn != "" ? fn : name);
-                gsub(/\\032/, " ", disp);
-                # Device names are attacker-controlled (mDNS). Strip tab/CR/LF so
+                # Device names are attacker-controlled (mDNS). unesc() refuses to
+                # decode control bytes, and we still strip any literal tab/CR/LF so
                 # a name cannot break out of the tab-delimited handoff to jq and
                 # forge entries. addr/port come from avahi fields, not the name.
+                disp = unesc(fn != "" ? fn : name);
                 gsub(/[\t\r\n]/, " ", disp);
                 printf "%s\t%s\t%s\n", disp, addr, port;
             }
@@ -427,6 +506,594 @@ miracast_targets_text() {
     '
 }
 
+# --- AirPlay video out (Apple TV / AirPlay-2 TVs), via pyatv ----------------
+# Discovery is dependency-free (avahi mDNS); only the actual cast needs pyatv.
+
+# Find a Python that can import pyatv. Prefer the pipx venv (how install.sh
+# sets it up); fall back to any python3 that happens to have pyatv.
+pyatv_python() {
+    local p
+    for p in "${HOME}/.local/share/pipx/venvs/pyatv/bin/python" python3; do
+        if command -v "${p}" >/dev/null 2>&1 && "${p}" -c 'import pyatv' >/dev/null 2>&1; then
+            printf '%s\n' "${p}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+have_pyatv() { pyatv_python >/dev/null 2>&1; }
+
+PIPX_PYATV_VENV="${HOME}/.local/share/pipx/venvs/pyatv"
+
+repair_pyatv() {
+    # A pipx venv breaks when the system Python it was built against is removed
+    # (e.g. an Ubuntu upgrade bumps 3.13 -> 3.14), leaving a dangling interpreter.
+    # If the venv dir is present but pyatv won't import, reinstall it in place.
+    command -v pipx >/dev/null 2>&1 || return 1
+    [[ -d "${PIPX_PYATV_VENV}" ]] || return 1
+    printf 'kast: pyatv looks broken (Python changed under it?); reinstalling via pipx...\n' >&2
+    pipx reinstall pyatv >/dev/null 2>&1 || pipx install --force pyatv >/dev/null 2>&1
+}
+
+require_pyatv() {
+    if ! have_pyatv; then
+        # Self-heal a venv broken by a Python/OS upgrade, then re-check, before
+        # giving up. A broken venv means the feature is dead either way, so
+        # repairing is strictly better than failing.
+        if repair_pyatv && have_pyatv; then
+            printf 'kast: pyatv reinstalled.\n' >&2
+        else
+            die "pyatv is not available. Install it with:  pipx install pyatv
+(If you just upgraded Python or Ubuntu, run:  kast repair  — or  pipx reinstall pyatv)"
+        fi
+    fi
+    [[ -f "${AIRPLAY_HELPER}" ]] || die "kast-airplay helper missing at ${AIRPLAY_HELPER}; re-run ./install.sh"
+}
+
+repair_run() {
+    # User-invokable repair for the pipx-managed helpers.
+    local fixed=0
+    if [[ -d "${PIPX_PYATV_VENV}" ]] && ! have_pyatv; then
+        repair_pyatv && have_pyatv && { printf 'pyatv: repaired.\n'; fixed=1; } || printf 'pyatv: repair failed (try: pipx reinstall pyatv).\n' >&2
+    elif have_pyatv; then
+        printf 'pyatv: ok.\n'
+    else
+        printf 'pyatv: not installed (pipx install pyatv).\n'
+    fi
+    if command -v pipx >/dev/null 2>&1 && [[ -d "${HOME}/.local/share/pipx/venvs/catt" ]] && ! command -v catt >/dev/null 2>&1; then
+        pipx reinstall catt >/dev/null 2>&1 && { printf 'catt: repaired.\n'; fixed=1; } || true
+    fi
+    [[ "${fixed}" -eq 1 ]] || printf 'Nothing to repair.\n'
+}
+
+airplay_targets_json() {
+    need jq
+    # AirPlay video receivers advertise _airplay._tcp over mDNS. Same passive
+    # avahi cache and hardened parse as cast_targets: names are attacker-
+    # controlled, so strip field/line breakers before the tab-delimited handoff.
+    if ! command -v avahi-browse >/dev/null 2>&1; then
+        printf '[]\n'
+        return 0
+    fi
+    avahi-browse -rpt _airplay._tcp 2>/dev/null \
+        | LC_ALL=C awk -F';' '
+            function unesc(s,    out, i, c, code) {
+                # avahi -p escapes bytes as decimal \DDD. Decode printable/UTF-8
+                # bytes (>=32) to real bytes (LC_ALL=C keeps %c byte-exact so
+                # multibyte UTF-8 reassembles); leave control bytes (<32) escaped
+                # so a hostile mDNS name cannot inject ESC/newline/tab.
+                out = "";
+                for (i = 1; i <= length(s); i++) {
+                    c = substr(s, i, 1);
+                    if (c == "\\" && substr(s, i + 1, 3) ~ /^[0-9][0-9][0-9]$/) {
+                        code = substr(s, i + 1, 3) + 0;
+                        if (code >= 32) out = out sprintf("%c", code);
+                        else            out = out "\\" substr(s, i + 1, 3);
+                        i += 3;
+                    } else {
+                        out = out c;
+                    }
+                }
+                return out;
+            }
+            $1 == "=" && $3 == "IPv4" {
+                name = $4; addr = $8; port = $9; devid = "";
+                n = split($0, q, "\"");
+                for (i = 1; i <= n; i++) {
+                    if (q[i] ~ /^deviceid=/) { devid = substr(q[i], 10) }
+                }
+                disp = unesc(name);
+                # Belt-and-suspenders: drop any literal breakers that survive.
+                gsub(/[\t\r\n]/, " ", disp);
+                gsub(/[\t\r\n]/, "", devid);
+                printf "%s\t%s\t%s\t%s\n", disp, addr, port, devid;
+            }
+        ' \
+        | jq -R -s '
+            [ split("\n")[]
+              | select(length > 0)
+              | split("\t")
+              | { name: .[0], address: .[1], port: (.[2] | tonumber? // null),
+                  identifier: (if .[3] == "" then null else .[3] end),
+                  protocol: "airplay" }
+            ]
+            | unique_by(.address)
+        '
+}
+
+airplay_targets_text() {
+    airplay_targets_json | jq -r '
+        if length == 0 then
+            "No AirPlay receivers discovered"
+        else
+            .[] | "\(.name)  [\(.address):\(.port)]  (airplay)"
+        end
+    '
+}
+
+resolve_airplay_target() {
+    # Resolve a user token (address, deviceid, or name substring) to "addr<TAB>id".
+    local token="${1:-}"
+    [[ -n "${token}" ]] || die "an AirPlay target (name, address, or id) is required"
+    airplay_targets_json | jq -r --arg t "${token}" '
+        ( ( map(select(.address == $t or .identifier == $t)) | first )
+          // ( map(select((.name | ascii_downcase) | contains($t | ascii_downcase))) | first ) )
+        | if . == null then "" else "\(.address)\t\(.identifier // "")" end'
+}
+
+airplay_cast() {
+    local target="${1:-}" media="${2:-}"
+    [[ -n "${target}" && -n "${media}" ]] || die "usage: kast airplay-cast <target> <url-or-file>"
+    require_pyatv
+
+    local resolved addr
+    resolved="$(resolve_airplay_target "${target}")"
+    [[ -n "${resolved}" ]] || die "No AirPlay receiver matching '${target}'. List them with: kast airplay-targets"
+    addr="${resolved%%$'\t'*}"
+
+    ensure_state_dir
+    local subcmd py
+    if [[ "${media}" =~ ^https?:// ]]; then
+        subcmd="play"             # the receiver fetches the URL itself
+    else
+        [[ -f "${media}" ]] || die "File not found: ${media}"
+        subcmd="stream"           # push a local file to the receiver
+    fi
+    py="$(pyatv_python)"
+    # The helper auto-loads any credentials saved by 'kast airplay-pair' (some
+    # receivers require pairing; many TVs allow casting without a code).
+    exec "${py}" "${AIRPLAY_HELPER}" "${subcmd}" "${addr}" "${media}" "${PYATV_STORAGE}"
+}
+
+pick_video_file() {
+    # Graphical file chooser → prints the chosen path (empty on cancel).
+    local title="${1:-Cast a video}"
+    command -v zenity >/dev/null 2>&1 || die "zenity is needed for the file picker"
+    zenity --file-selection \
+        --title="${title}" \
+        --file-filter='Video | *.mp4 *.m4v *.mkv *.mov *.webm *.avi' \
+        --file-filter='All files | *' 2>/dev/null || true
+}
+
+airplay_pick() {
+    # Pick a video file, then cast it to an AirPlay receiver. Used by the tile.
+    local target="${1:-}"
+    [[ -n "${target}" ]] || die "usage: kast airplay-pick <target>"
+    require_pyatv
+    local file; file="$(pick_video_file "Cast a video to ${target}")"
+    [[ -n "${file}" ]] || return 0
+    airplay_cast "${target}" "${file}"
+}
+
+cast_file_pick() {
+    # Pick a video file, then play it on any target (AirPlay or Chromecast).
+    local target="${1:-}"
+    [[ -n "${target}" ]] || die "usage: kast cast-file-pick <target>"
+    local file; file="$(pick_video_file "Cast a video to ${target}")"
+    [[ -n "${file}" ]] || return 0
+    cast_file "${target}" "${file}"
+}
+
+airplay_pair() {
+    local target="" gui=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --gui) gui="--gui" ;;
+            *) [[ -z "${target}" ]] && target="$1" ;;
+        esac
+        shift
+    done
+    [[ -n "${target}" ]] || die "usage: kast airplay-pair <target> [--gui]"
+    require_pyatv
+
+    local resolved addr py
+    resolved="$(resolve_airplay_target "${target}")"
+    [[ -n "${resolved}" ]] || die "No AirPlay receiver matching '${target}'."
+    addr="${resolved%%$'\t'*}"
+
+    ensure_state_dir
+    py="$(pyatv_python)"
+    printf 'Pairing with %s — enter the PIN shown on the receiver when prompted.\n' "${target}"
+    exec "${py}" "${AIRPLAY_HELPER}" pair "${addr}" "${PYATV_STORAGE}" ${gui:+--gui}
+}
+
+# --- Unified cast layer -----------------------------------------------------
+# One list across protocols, each tagged with what it can do and how kast
+# connects to it. Passive sources only (Chromecast mDNS + AirPlay mDNS);
+# Miracast stays a separate on-demand scan (it time-slices the Wi-Fi radio).
+
+targets_json() {
+    need jq
+    local cc ap
+    cc="$(cast_targets_json 2>/dev/null || printf '[]')"
+    ap="$(airplay_targets_json 2>/dev/null || printf '[]')"
+    jq -n --argjson chromecast "${cc}" --argjson airplay "${ap}" '
+        ( $chromecast | map(. + {capabilities: ["video", "mirror"], connect: "display-cast"}) )
+        + ( $airplay   | map(. + {capabilities: ["video"],          connect: "airplay-cast"}) )
+    '
+}
+
+targets_text() {
+    targets_json | jq -r '
+        if length == 0 then
+            "No cast targets discovered  (Miracast: run kast miracast-targets)"
+        else
+            .[] | "\(.name)  [\(.address // "?"):\(.port // "?")]  \(.protocol) — \(.capabilities | join("/"))"
+        end
+    '
+}
+
+# --- gnome-network-displays daemon (one-click Chromecast/Miracast connect) ---
+
+gnd_daemon_installed() { command -v "${GND_DAEMON_BIN}" >/dev/null 2>&1; }
+
+gnd_bus_up() { busctl --user list 2>/dev/null | grep -q "${GND_DEST}"; }
+
+gnd_daemon_ensure() {
+    # Reachable on the session bus, spawning the daemon if needed. There is no
+    # D-Bus .service activation file yet, so kast starts it. Returns non-zero if
+    # the daemon isn't installed (caller then falls back to the GUI).
+    gnd_daemon_installed || return 1
+    gnd_bus_up && return 0
+    setsid "${GND_DAEMON_BIN}" >/dev/null 2>&1 </dev/null &
+    disown 2>/dev/null || true
+    local i
+    for ((i = 0; i < 12; i++)); do
+        gnd_bus_up && return 0
+        sleep 0.5
+    done
+    return 1
+}
+
+gnd_displays_json() {
+    need jq
+    busctl --user --json=short get-property "${GND_DEST}" "${GND_OBJ}" "${GND_IFACE}" Displays 2>/dev/null \
+        | jq -c '[ (.data // [])[]
+                   | {uuid: .uuid.data, name: ."display-name".data,
+                      protocol: .protocol.data, state: .state.data} ]' 2>/dev/null \
+        || printf '[]\n'
+}
+
+gnd_find_sink_uuid() {
+    # Poll Displays for a sink matching the name (the daemon runs its own mDNS/
+    # P2P discovery, so a freshly discovered sink can take a few seconds).
+    local want="$1" tries="${2:-20}" i uuid
+    for ((i = 0; i < tries; i++)); do
+        uuid="$(gnd_displays_json | jq -r --arg n "${want}" '
+            ( ( map(select((.name | ascii_downcase) == ($n | ascii_downcase))) | first )
+              // ( map(select((.name | ascii_downcase) | contains($n | ascii_downcase))) | first ) )
+            | .uuid // empty')"
+        [[ -n "${uuid}" ]] && { printf '%s\n' "${uuid}"; return 0; }
+        sleep 0.5
+    done
+    return 1
+}
+
+gnd_connect() {
+    # 0 connected; 1 daemon unavailable; 2 sink not found; 3 StartStream failed.
+    local name="$1" uuid unit
+    gnd_daemon_ensure || return 1
+    uuid="$(gnd_find_sink_uuid "${name}")" || return 2
+    ensure_state_dir
+    unit="$(busctl --user call "${GND_DEST}" "${GND_OBJ}" "${GND_IFACE}" StartStream s "${uuid}" 2>/dev/null \
+        | sed -n 's/^s "\(.*\)"$/\1/p')"
+    [[ -n "${unit}" ]] || return 3
+    # Remember the unit (for StopStream) and the target name (for status display).
+    printf '%s\t%s\n' "${unit}" "${name}" > "${GND_STREAM_FILE}"
+    return 0
+}
+
+gnd_disconnect() {
+    local line unit
+    if [[ ! -f "${GND_STREAM_FILE}" ]]; then
+        printf 'No active display stream.\n'
+        return 0
+    fi
+    line="$(<"${GND_STREAM_FILE}")"
+    unit="${line%%$'\t'*}"
+    busctl --user call "${GND_DEST}" "${GND_OBJ}" "${GND_IFACE}" StopStream s "${unit}" >/dev/null 2>&1 || true
+    rm -f "${GND_STREAM_FILE}"
+    printf 'Stopped display stream.\n'
+}
+
+cast_state_json() {
+    # Active outbound display stream, if any. The unit is a transient systemd
+    # user unit, so its liveness is the source of truth; a missing/dead unit
+    # means the stream ended (clean up the stale marker).
+    need jq
+    local active="false" unit="" target="" line
+    if [[ -f "${GND_STREAM_FILE}" ]]; then
+        line="$(<"${GND_STREAM_FILE}")"
+        unit="${line%%$'\t'*}"
+        target="${line#*$'\t'}"
+        [[ "${target}" == "${unit}" ]] && target=""
+        if [[ -n "${unit}" ]] && systemctl --user is-active --quiet "${unit}" 2>/dev/null; then
+            active="true"
+        else
+            rm -f "${GND_STREAM_FILE}"
+            unit=""; target=""
+        fi
+    fi
+    jq -n --argjson active "${active}" --arg unit "${unit}" --arg target "${target}" \
+        '{active: $active,
+          target: (if $target == "" then null else $target end),
+          unit: (if $unit == "" then null else $unit end)}'
+}
+
+display_connect() {
+    # One-click connect to a display sink (Chromecast/Miracast) by name via the
+    # gnd daemon, falling back to its GUI picker when unavailable. Used by both
+    # `kast connect` and the GNOME tile.
+    local name="${1:-}"
+    [[ -n "${name}" ]] || die "usage: kast display-connect <name>"
+    if gnd_connect "${name}"; then
+        printf 'Streaming to %s — stop with: kast disconnect\n' "${name}"
+    else
+        printf 'One-click connect unavailable (daemon absent or still scanning); opening the picker.\n' >&2
+        open_display_cast
+    fi
+}
+
+cast_pick() {
+    # kast's own cast menu — a graphical picker that works regardless of the
+    # GNOME shell version (the Quick Settings tile can't be popped from a
+    # launcher, and a shell upgrade can disable the extension entirely). Lists
+    # the fast passive targets (Chromecast + AirPlay) plus, with --miracast, the
+    # results of an on-demand Wi-Fi P2P scan; an active-stream Disconnect; and a
+    # hand-off to the full GUI picker.
+    need jq
+    command -v zenity >/dev/null 2>&1 || die "zenity is required for the picker (apt install zenity)"
+    local include_miracast=0
+    [[ "${1:-}" == "--miracast" ]] && include_miracast=1
+
+    # Parallel arrays: zenity prints a hidden index; we look up the action so a
+    # device name (attacker-controlled mDNS) never has to round-trip as a key.
+    local rows=() actions=() i=0 proto name addr typ
+    while IFS=$'\t' read -r proto name addr; do
+        [[ -n "${proto}" ]] || continue
+        case "${proto}" in
+            chromecast) typ="Chromecast";    rows+=("${typ}" "${name}" "${i}"); actions+=("display-connect"$'\t'"${name}"); i=$((i + 1)) ;;
+            airplay)    typ="AirPlay video"; rows+=("${typ}" "${name} — cast file…" "${i}"); actions+=("airplay-pick"$'\t'"${addr:-${name}}"); i=$((i + 1)) ;;
+        esac
+    done < <(targets_json | jq -r '.[] | [.protocol, .name, (.address // "")] | @tsv')
+
+    # Miracast shares the Wi-Fi radio, so it is an explicit on-demand scan rather
+    # than part of the passive list.
+    if [[ "${include_miracast}" -eq 1 ]]; then
+        while IFS=$'\t' read -r name; do
+            [[ -n "${name}" ]] || continue
+            rows+=("Miracast" "${name}" "${i}"); actions+=("display-connect"$'\t'"${name}"); i=$((i + 1))
+        done < <(miracast_targets_json | jq -r '.[] | select(.miracast) | .name')
+    else
+        rows+=("Miracast" "Scan for Miracast displays…" "${i}"); actions+=("scan-miracast"$'\t'); i=$((i + 1))
+    fi
+
+    if [[ "$(cast_state_json | jq -r '.active')" == "true" ]]; then
+        local tgt; tgt="$(cast_state_json | jq -r '.target // "display"')"
+        rows+=("Streaming" "Disconnect (${tgt})" "${i}"); actions+=("disconnect"$'\t'); i=$((i + 1))
+    fi
+    rows+=("More" "Open display picker (GUI)…" "${i}"); actions+=("open-display-cast"$'\t'); i=$((i + 1))
+
+    local choice
+    choice="$(zenity --list \
+        --title="Kast — Cast to…" \
+        --text="Choose a device to cast to:" \
+        --column="Type" --column="Device" --column="idx" \
+        --hide-column=3 --print-column=3 \
+        --width=440 --height=380 \
+        "${rows[@]}" 2>/dev/null)" || return 0
+    [[ -n "${choice}" ]] || return 0
+
+    local action arg
+    action="${actions[${choice}]%%$'\t'*}"
+    arg="${actions[${choice}]#*$'\t'}"
+    case "${action}" in
+        display-connect)   display_connect "${arg}" ;;
+        airplay-pick)      airplay_pick "${arg}" ;;
+        scan-miracast)     cast_pick --miracast ;;
+        disconnect)        gnd_disconnect ;;
+        open-display-cast) open_display_cast ;;
+    esac
+}
+
+# --- Control center: backend-agnostic device control ------------------------
+# Capabilities are discovered per device, never assumed. AirPlay devices route
+# to the pyatv helper (which queries pyatv's feature map); a gnd screen-mirror
+# session is not a media session, so its only control is stop (= disconnect).
+
+control_caps_json() {
+    # Normalized capability set for a target, as JSON {action: bool, ...}.
+    local proto="$1" ref="$2" py
+    case "${proto}" in
+        airplay)
+            require_pyatv
+            py="$(pyatv_python)"
+            "${py}" "${AIRPLAY_HELPER}" caps "${ref}" "${PYATV_STORAGE}" 2>/dev/null \
+                || printf '{}\n'
+            ;;
+        chromecast|miracast)
+            # gnd mirror: a screencast, not a media session — only stop.
+            printf '{"stop":true}\n'
+            ;;
+        *)
+            printf '{}\n'
+            ;;
+    esac
+}
+
+control_resolve() {
+    # Resolve a user token to "<protocol>\t<ref>". Prefer an AirPlay receiver
+    # (controllable), else fall back to a display target.
+    local token="${1:-}" ap disp
+    [[ -n "${token}" ]] || return 1
+    ap="$(airplay_targets_json | jq -r --arg t "${token}" '
+        ( ( map(select(.address == $t or .identifier == $t)) | first )
+          // ( map(select((.name | ascii_downcase) | contains($t | ascii_downcase))) | first ) )
+        | if . == null then "" else "airplay\t\(.address)" end')"
+    if [[ -n "${ap}" ]]; then printf '%s\n' "${ap}"; return 0; fi
+    disp="$(targets_json | jq -r --arg t "${token}" '
+        ( ( map(select(.address == $t)) | first )
+          // ( map(select((.name | ascii_downcase) | contains($t | ascii_downcase))) | first ) )
+        | if . == null then "" else "\(.protocol)\t\(.name)" end')"
+    [[ -n "${disp}" ]] && { printf '%s\n' "${disp}"; return 0; }
+    return 1
+}
+
+control_list_json() {
+    # The "control center" inventory: every controllable target + its caps.
+    need jq
+    local out="[]" proto ref name caps
+    while IFS=$'\t' read -r name addr; do
+        [[ -n "${addr}" ]] || continue
+        caps="$(control_caps_json airplay "${addr}")"
+        out="$(jq -c --arg name "${name}" --arg addr "${addr}" --argjson caps "${caps}" \
+            '. + [{name:$name, address:$addr, protocol:"airplay", caps:$caps}]' <<<"${out}")"
+    done < <(airplay_targets_json | jq -r '.[] | [.name, .address] | @tsv')
+    # The active display stream (if any) is controllable only as stop/disconnect.
+    if [[ "$(cast_state_json | jq -r '.active')" == "true" ]]; then
+        local tgt; tgt="$(cast_state_json | jq -r '.target // "display"')"
+        out="$(jq -c --arg t "${tgt}" '. + [{name:$t, protocol:"display", caps:{stop:true}, streaming:true}]' <<<"${out}")"
+    fi
+    printf '%s\n' "${out}"
+}
+
+control_run() {
+    # kast control [<target> [<action> [arg]]]
+    #   (no target)            -> list controllable devices + caps
+    #   <target> caps          -> capability JSON
+    #   <target> now-playing   -> now-playing JSON
+    #   <target> <action> [a]  -> run a normalized control action
+    need jq
+    local target="${1:-}"
+    if [[ -z "${target}" ]]; then
+        control_list_json
+        return 0
+    fi
+    local action="${2:-caps}" arg="${3:-}" resolved proto ref py
+    resolved="$(control_resolve "${target}")" || die "No controllable target matching '${target}'. List them with: kast control"
+    proto="${resolved%%$'\t'*}"
+    ref="${resolved#*$'\t'}"
+
+    case "${action}" in
+        caps)
+            control_caps_json "${proto}" "${ref}"
+            return 0
+            ;;
+        now-playing|nowplaying)
+            [[ "${proto}" == "airplay" ]] || die "now-playing is only available for AirPlay devices"
+            require_pyatv; py="$(pyatv_python)"
+            "${py}" "${AIRPLAY_HELPER}" nowplaying "${ref}" "${PYATV_STORAGE}"
+            return 0
+            ;;
+        stop)
+            # stop is universal: a display mirror stops by disconnecting.
+            if [[ "${proto}" == "airplay" ]]; then
+                require_pyatv; py="$(pyatv_python)"
+                exec "${py}" "${AIRPLAY_HELPER}" cmd "${ref}" stop "" "${PYATV_STORAGE}"
+            else
+                gnd_disconnect
+            fi
+            return 0
+            ;;
+    esac
+
+    # Everything else is an active control action — AirPlay only.
+    [[ "${proto}" == "airplay" ]] || die "'${action}' is not supported on a ${proto} screen-mirror session (only stop)"
+    require_pyatv; py="$(pyatv_python)"
+    exec "${py}" "${AIRPLAY_HELPER}" cmd "${ref}" "${action}" "${arg}" "${PYATV_STORAGE}"
+}
+
+# --- Chromecast media (file/URL) via catt -----------------------------------
+# gnd mirrors the screen to a Chromecast; catt plays a file/URL on it — the
+# Chromecast equivalent of airplay-cast, giving file-cast parity across both.
+
+have_catt() { command -v catt >/dev/null 2>&1; }
+
+chromecast_cast() {
+    local name="$1" media="$2"
+    [[ -n "${name}" && -n "${media}" ]] || die "usage: kast cast-file <chromecast> <url-or-file>"
+    have_catt || die "catt is required to cast files to Chromecast. Install it with:  pipx install catt"
+    if [[ ! "${media}" =~ ^https?:// ]]; then
+        [[ -f "${media}" ]] || die "File not found: ${media}"
+    fi
+    exec catt --device "${name}" cast "${media}"
+}
+
+cast_file() {
+    # Unified "play this file/URL on that device": AirPlay -> pyatv, Chromecast -> catt.
+    local id="${1:-}" media="${2:-}"
+    [[ -n "${id}" && -n "${media}" ]] || die "usage: kast cast-file <target> <url-or-file>"
+    need jq
+    local entry proto addr name
+    entry="$(targets_json | jq -c --arg t "${id}" '
+        ( ( map(select(.address == $t)) | first )
+          // ( map(select((.name | ascii_downcase) | contains($t | ascii_downcase))) | first ) )
+        // empty')"
+    [[ -n "${entry}" && "${entry}" != "null" ]] || die "No target matching '${id}'. List them with: kast targets"
+    proto="$(jq -r '.protocol' <<<"${entry}")"
+    addr="$(jq -r '.address // empty' <<<"${entry}")"
+    name="$(jq -r '.name' <<<"${entry}")"
+    case "${proto}" in
+        airplay)    airplay_cast "${addr}" "${media}" ;;
+        chromecast) chromecast_cast "${name}" "${media}" ;;
+        *)          die "Can't cast a file to a '${proto}' target" ;;
+    esac
+}
+
+connect_target() {
+    # Unified connect: route a discovered target to the right backend.
+    local id="${1:-}" media="${2:-}"
+    [[ -n "${id}" ]] || die "usage: kast connect <name|address> [media-url-or-file]"
+    need jq
+    local entry proto addr name
+    entry="$(targets_json | jq -c --arg t "${id}" '
+        ( ( map(select(.address == $t)) | first )
+          // ( map(select((.name | ascii_downcase) | contains($t | ascii_downcase))) | first ) )
+        // empty')"
+    [[ -n "${entry}" && "${entry}" != "null" ]] || die "No target matching '${id}'. List them with: kast targets"
+    proto="$(jq -r '.protocol' <<<"${entry}")"
+    addr="$(jq -r '.address // empty' <<<"${entry}")"
+    name="$(jq -r '.name' <<<"${entry}")"
+    case "${proto}" in
+        chromecast)
+            # With media, play the file/URL (catt); without, mirror the screen (gnd).
+            if [[ -n "${media}" ]]; then
+                chromecast_cast "${name}" "${media}"
+            else
+                display_connect "${name}"
+            fi
+            ;;
+        airplay)
+            [[ -n "${media}" ]] || die "AirPlay targets need media: kast connect '${id}' <url-or-file>   (for audio, use: kast select-airplay)"
+            airplay_cast "${addr}" "${media}"
+            ;;
+        *)
+            die "Don't know how to connect to a '${proto}' target yet"
+            ;;
+    esac
+}
+
 open_sound() {
     if command -v gnome-control-center >/dev/null 2>&1; then
         spawn_app gnome-control-center sound
@@ -467,6 +1134,73 @@ toggle_receiver() {
     fi
 }
 
+# --- AirPlay AUDIO receiver (shairport-sync) --------------------------------
+# uxplay handles AirPlay screen mirroring; shairport-sync is the audio-in path
+# (lossless AirPlay audio from any Apple device). Separate LAN listener, also
+# off by default. The apt build is AirPlay-audio (classic) — AirPlay-2 multi-room
+# would need nqptp + a custom build, which Ubuntu does not package.
+
+audio_receiver_run() {
+    load_conf
+    need shairport-sync
+    # Route through PipeWire's PulseAudio shim (pipewire-pulse is in packages.txt).
+    exec shairport-sync -a "${SHAIRPORT_NAME:-Kast Audio}" -o pa "${SHAIRPORT_ARGS[@]}"
+}
+
+audio_receiver_status() {
+    systemctl --user status shairport-sync.service --no-pager
+}
+
+toggle_audio_receiver() {
+    if systemctl --user is-active --quiet shairport-sync.service; then
+        systemctl --user stop shairport-sync.service
+    else
+        systemctl --user start shairport-sync.service
+    fi
+}
+
+# --- YouTube DIAL receiver (yt-cast-receiver + mpv) -------------------------
+# A Node app advertises the box over DIAL; phone YouTube/YT-Music apps cast to
+# it and it plays the stream with mpv. No Google Cast auth (DIAL sidesteps it).
+# Off by default like the other receivers.
+YT_RECEIVER_DIR="${DATA_HOME}/${APP_ID}/youtube-receiver"
+
+find_node() {
+    # systemd's PATH may lack a user node (nvm). Prefer system node, then a
+    # configured one, then the newest nvm install.
+    local n
+    if [[ -n "${KAST_NODE:-}" ]] && command -v "${KAST_NODE}" >/dev/null 2>&1; then
+        printf '%s\n' "${KAST_NODE}"; return 0
+    fi
+    if command -v node >/dev/null 2>&1; then command -v node; return 0; fi
+    for n in "${HOME}"/.nvm/versions/node/*/bin/node; do
+        [[ -x "${n}" ]] && { printf '%s\n' "${n}"; return 0; }
+    done
+    return 1
+}
+
+youtube_receiver_run() {
+    load_conf
+    local node
+    node="$(find_node)" || die "Node.js is required for the YouTube receiver (apt install nodejs)"
+    [[ -f "${YT_RECEIVER_DIR}/index.mjs" ]] || die "YouTube receiver not installed; re-run ./install.sh"
+    command -v mpv >/dev/null 2>&1 || die "mpv is required to play YouTube casts (apt install mpv)"
+    export KAST_YT_NAME="${YT_RECEIVER_NAME:-Kast YouTube}"
+    exec "${node}" "${YT_RECEIVER_DIR}/index.mjs"
+}
+
+youtube_receiver_status() {
+    systemctl --user status kast-youtube.service --no-pager
+}
+
+toggle_youtube_receiver() {
+    if systemctl --user is-active --quiet kast-youtube.service; then
+        systemctl --user stop kast-youtube.service
+    else
+        systemctl --user start kast-youtube.service
+    fi
+}
+
 DOCTOR_OK=0
 DOCTOR_WARN=0
 DOCTOR_FAIL=0
@@ -495,12 +1229,31 @@ doctor_run() {
     if have gdbus && have busctl; then mark ok "gdbus + busctl (Miracast P2P)"; else mark warn "gdbus/busctl missing" "Miracast discovery off"; fi
     if nmcli -t -f TYPE device status 2>/dev/null | grep -qx 'wifi-p2p'; then mark ok "Wi-Fi P2P device present"; else mark warn "no Wi-Fi P2P device" "this adapter can't do Miracast"; fi
 
-    printf '\nReceiver (inbound AirPlay, off by default)\n'
-    if have uxplay; then mark ok "uxplay installed"; else mark warn "uxplay not installed" "apt install uxplay for receiver mode"; fi
-    if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then mark ok "receiver running (PIN-gated)"; else mark ok "receiver off (enable from the Kast tile)"; fi
+    printf '\nReceivers (inbound, off by default)\n'
+    if have uxplay; then mark ok "uxplay installed (AirPlay screen mirroring in)"; else mark warn "uxplay not installed" "apt install uxplay for AirPlay screen mirroring"; fi
+    if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then mark ok "AirPlay video receiver running (PIN-gated)"; else mark ok "AirPlay video receiver off (enable from the Kast tile)"; fi
+    if have shairport-sync; then mark ok "shairport-sync installed (AirPlay audio in)"; else mark warn "shairport-sync not installed" "apt install shairport-sync for AirPlay audio in"; fi
+    if systemctl --user is-active --quiet shairport-sync.service 2>/dev/null; then mark ok "AirPlay audio receiver running"; else mark ok "AirPlay audio receiver off (enable from the Kast tile)"; fi
+    if [[ -f "${YT_RECEIVER_DIR}/index.mjs" ]] && find_node >/dev/null 2>&1 && have mpv; then
+        mark ok "YouTube DIAL receiver ready (node + mpv)"
+    elif [[ -f "${YT_RECEIVER_DIR}/index.mjs" ]]; then
+        mark warn "YouTube receiver needs node + mpv" "apt install nodejs mpv (and yt-dlp); then re-run ./install.sh"
+    else
+        mark warn "YouTube receiver not installed" "re-run ./install.sh with node + npm present"
+    fi
+    if systemctl --user is-active --quiet kast-youtube.service 2>/dev/null; then mark ok "YouTube receiver running"; else mark ok "YouTube receiver off (enable from the Kast tile)"; fi
 
     printf '\nOutbound display cast\n'
     if have gnome-network-displays; then mark ok "gnome-network-displays installed"; else mark fail "gnome-network-displays missing" "apt install gnome-network-displays"; fi
+    if have "${GND_DAEMON_BIN}"; then mark ok "gnd daemon (one-click connect)"; else mark warn "gnd daemon missing" "one-click connect needs gnome-network-displays >=0.99.0; casting falls back to the GUI"; fi
+    if have_pyatv; then
+        mark ok "pyatv (AirPlay video out)"
+    elif [[ -e "${HOME}/.local/share/pipx/venvs/pyatv" ]]; then
+        mark warn "pyatv venv broken" "Python changed under it; run: kast repair"
+    else
+        mark warn "pyatv not installed" "AirPlay video-out off; pipx install pyatv"
+    fi
+    if have_catt; then mark ok "catt (Chromecast file-cast)"; else mark warn "catt not installed" "Chromecast file-cast off; pipx install catt"; fi
 
     printf '\nAudio routing\n'
     local raop="${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
@@ -508,12 +1261,24 @@ doctor_run() {
 
     printf '\nDesktop integration\n'
     local ext_dir="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/kast@asuramaya"
-    if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions list --enabled 2>/dev/null | grep -qx 'kast@asuramaya'; then
+    local ext_state=""
+    command -v gnome-extensions >/dev/null 2>&1 && ext_state="$(gnome-extensions info kast@asuramaya 2>/dev/null | sed -n 's/^ *State: *//p')"
+    if [[ "${ext_state}" == "OUT OF DATE"* ]]; then
+        # The shell-version pin in metadata.json is too old for this GNOME — the
+        # tile won't load. The graphical picker (kast pick) still works.
+        mark warn "Quick Settings extension out of date for this GNOME" "update kast (newer metadata supports this shell); meanwhile use 'kast pick'"
+    elif command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions list --enabled 2>/dev/null | grep -qx 'kast@asuramaya'; then
         mark ok "Quick Settings extension enabled"
     elif [[ -f "${ext_dir}/extension.js" ]]; then
         mark warn "Quick Settings extension installed but not enabled" "gnome-extensions enable kast@asuramaya, then log out/in"
     else
         mark warn "Quick Settings extension not installed" "re-run ./install.sh"
+    fi
+    if command -v zenity >/dev/null 2>&1; then mark ok "graphical picker (kast pick)"; else mark warn "zenity missing" "kast pick needs zenity; apt install zenity"; fi
+    if [[ -f "${CONTROL_CENTER}" ]] && python3 -c 'import gi; gi.require_version("Gtk","4.0"); gi.require_version("Adw","1")' >/dev/null 2>&1; then
+        mark ok "control center window (kast control-center)"
+    else
+        mark warn "control center unavailable" "needs python3-gi + GTK4/Adwaita (gir1.2-adw-1)"
     fi
     if gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings 2>/dev/null | grep -q '/custom-keybindings/kast/'; then mark ok "Super+K shortcut installed"; else mark warn "shortcut not installed" "kast install-shortcut"; fi
 
@@ -575,8 +1340,24 @@ usage() {
 Usage:
   kast status [--json]
   kast sinks [--json]
+  kast pick [--miracast]                 (graphical "cast to…" menu)
+  kast targets [--json]
+  kast connect <name|address> [media-url-or-file]
+  kast cast-file <target> <url-or-file>  (play a file on AirPlay or Chromecast)
+  kast display-connect <name>
+  kast disconnect
+  kast control [<target> [<action> [arg]]]   (control center; action: caps,
+               now-playing, stop, play, pause, play_pause, next, previous,
+               seek <s>, volume_up, volume_down, set_volume <0-100>,
+               power_on, power_off, key <up|down|left|right|select|menu|home>,
+               launch_app <id>)
+  kast control-center [<target>]              (graphical remote window)
   kast cast-targets [--json]
   kast miracast-targets [--json]
+  kast airplay-targets [--json]
+  kast airplay-cast <target> <url-or-file>
+  kast airplay-pick <target>
+  kast airplay-pair <target> [--gui]
   kast open-display-cast [--drop-wifi]
   kast open-display-cast-plain
   kast open-sound
@@ -587,14 +1368,27 @@ Usage:
   kast select-local
   kast set-mode <mirror|video-overlay>
   kast get-mode
-  kast receiver-run
+  kast receiver-run                      (AirPlay screen mirroring in, uxplay)
   kast receiver-start
   kast receiver-stop
   kast receiver-restart
   kast receiver-status
   kast toggle-receiver
+  kast audio-receiver-run                (AirPlay audio in, shairport-sync)
+  kast audio-receiver-start
+  kast audio-receiver-stop
+  kast audio-receiver-restart
+  kast audio-receiver-status
+  kast toggle-audio-receiver
+  kast youtube-receiver-run                (YouTube/YT-Music in via DIAL, mpv)
+  kast youtube-receiver-start
+  kast youtube-receiver-stop
+  kast youtube-receiver-restart
+  kast youtube-receiver-status
+  kast toggle-youtube-receiver
   kast install-shortcut [binding]
   kast doctor
+  kast repair                            (reinstall pyatv/catt if a Python upgrade broke them)
   kast check-update [--json]
   kast update
   kast version
@@ -628,6 +1422,57 @@ case "${cmd}" in
             miracast_targets_text
         fi
         ;;
+    targets)
+        if [[ "${1:-}" == "--json" ]]; then
+            targets_json
+        else
+            targets_text
+        fi
+        ;;
+    pick|menu)
+        cast_pick "$@"
+        ;;
+    connect)
+        connect_target "$@"
+        ;;
+    cast-file)
+        cast_file "$@"
+        ;;
+    cast-file-pick)
+        cast_file_pick "${1:-}"
+        ;;
+    control)
+        control_run "$@"
+        ;;
+    control-center)
+        # The Adwaita window uses system python3 (it has PyGObject/Adwaita); the
+        # kast control calls it shells out to use the pyatv venv themselves.
+        [[ -f "${CONTROL_CENTER}" ]] || die "control center not installed at ${CONTROL_CENTER}; re-run ./install.sh"
+        command -v python3 >/dev/null 2>&1 || die "python3 is required for the control center"
+        exec python3 "${CONTROL_CENTER}" "$@"
+        ;;
+    display-connect)
+        display_connect "${1:-}"
+        ;;
+    disconnect)
+        gnd_disconnect
+        ;;
+    airplay-targets)
+        if [[ "${1:-}" == "--json" ]]; then
+            airplay_targets_json
+        else
+            airplay_targets_text
+        fi
+        ;;
+    airplay-cast)
+        airplay_cast "$@"
+        ;;
+    airplay-pick)
+        airplay_pick "${1:-}"
+        ;;
+    airplay-pair)
+        airplay_pair "$@"
+        ;;
     sinks)
         if [[ "${1:-}" == "--json" ]]; then
             list_sinks_json
@@ -638,7 +1483,7 @@ case "${cmd}" in
             '
         fi
         ;;
-    open-display-cast|menu)
+    open-display-cast)
         open_display_cast "$@"
         ;;
     open-display-cast-plain)
@@ -687,11 +1532,50 @@ case "${cmd}" in
     toggle-receiver)
         toggle_receiver
         ;;
+    audio-receiver-run)
+        audio_receiver_run
+        ;;
+    audio-receiver-start)
+        systemctl --user start shairport-sync.service
+        ;;
+    audio-receiver-stop)
+        systemctl --user stop shairport-sync.service
+        ;;
+    audio-receiver-restart)
+        systemctl --user restart shairport-sync.service
+        ;;
+    audio-receiver-status)
+        audio_receiver_status
+        ;;
+    toggle-audio-receiver)
+        toggle_audio_receiver
+        ;;
+    youtube-receiver-run)
+        youtube_receiver_run
+        ;;
+    youtube-receiver-start)
+        systemctl --user start kast-youtube.service
+        ;;
+    youtube-receiver-stop)
+        systemctl --user stop kast-youtube.service
+        ;;
+    youtube-receiver-restart)
+        systemctl --user restart kast-youtube.service
+        ;;
+    youtube-receiver-status)
+        youtube_receiver_status
+        ;;
+    toggle-youtube-receiver)
+        toggle_youtube_receiver
+        ;;
     install-shortcut)
         install_shortcut "${1:-<Super>k}"
         ;;
     doctor)
         doctor_run
+        ;;
+    repair)
+        repair_run
         ;;
     check-update)
         if [[ "${1:-}" == "--json" ]]; then check_update_json; else check_update_text; fi

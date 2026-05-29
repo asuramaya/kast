@@ -13,6 +13,8 @@ BIN_DIR="${HOME}/.local/bin"
 SHORTCUT="${KAST_SHORTCUT:-<Super>k}"
 SKIP_APT=0
 SKIP_SHORTCUT=0
+WITH_YOUTUBE=0
+WITH_AIRPLAY_AUDIO=0
 PACKAGE_STATUS_NOTE=""
 
 bootstrap_from_release() {
@@ -51,7 +53,17 @@ EXT_DIR="${DATA_HOME}/gnome-shell/extensions/${EXT_UUID}"
 
 usage() {
     cat <<'EOF'
-Usage: ./install.sh [--skip-apt] [--no-shortcut] [--shortcut '<Super>k']
+Usage: ./install.sh [options]
+  --skip-apt              don't touch apt (install kast files only)
+  --no-shortcut           don't bind the Super+K shortcut
+  --shortcut '<Super>k'   use a different shortcut
+  --with-airplay-audio    also install shairport-sync (AirPlay audio receive)
+  --with-youtube          also install nodejs/npm/mpv/yt-dlp (YouTube DIAL receive)
+  --with-all              install every optional feature's dependencies
+
+Core install gives outbound casting, AirPlay screen receive, the picker, and
+(via pipx) AirPlay video-out + the control center. The receivers above are
+opt-in because they pull heavier dependencies.
 EOF
 }
 
@@ -66,6 +78,16 @@ while [[ $# -gt 0 ]]; do
         --shortcut)
             shift
             SHORTCUT="${1:-}"
+            ;;
+        --with-airplay-audio)
+            WITH_AIRPLAY_AUDIO=1
+            ;;
+        --with-youtube)
+            WITH_YOUTUBE=1
+            ;;
+        --with-all)
+            WITH_AIRPLAY_AUDIO=1
+            WITH_YOUTUBE=1
             ;;
         -h|--help)
             usage
@@ -82,6 +104,10 @@ done
 
 install_packages() {
     mapfile -t packages < <(grep -Ev '^\s*(#|$)' "${ROOT_DIR}/packages.txt")
+    # Optional feature dependencies, added only when their flag is set, so a
+    # plain install stays lean.
+    [[ "${WITH_AIRPLAY_AUDIO}" -eq 1 ]] && packages+=(shairport-sync)
+    [[ "${WITH_YOUTUBE}" -eq 1 ]] && packages+=(nodejs npm mpv yt-dlp)
     sudo apt-get update
     # `--` stops a stray/crafted packages.txt line (e.g. "-o ...") from being
     # parsed as an apt option instead of a package name.
@@ -92,11 +118,20 @@ install_user_files() {
     mkdir -p "${BIN_DIR}"
     install -D -m 644 "${ROOT_DIR}/config/pipewire/50-raop.conf" "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
     install -D -m 755 "${ROOT_DIR}/scripts/kast" "${BIN_DIR}/kast"
+    # AirPlay video-out helper + Adwaita control-center window (kast finds them
+    # next to itself).
+    install -D -m 755 "${ROOT_DIR}/scripts/kast-airplay" "${BIN_DIR}/kast-airplay"
+    install -D -m 755 "${ROOT_DIR}/scripts/kast-control-center" "${BIN_DIR}/kast-control-center"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
         install -D -m 644 "${ROOT_DIR}/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi
     install -D -m 644 "${ROOT_DIR}/systemd/user/uxplay.service" "${CONFIG_HOME}/systemd/user/uxplay.service"
+    install -D -m 644 "${ROOT_DIR}/systemd/user/shairport-sync.service" "${CONFIG_HOME}/systemd/user/shairport-sync.service"
+    install -D -m 644 "${ROOT_DIR}/systemd/user/kast-youtube.service" "${CONFIG_HOME}/systemd/user/kast-youtube.service"
     install -D -m 644 "${ROOT_DIR}/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
+    # The desktop session's PATH may not include ~/.local/bin, so point the
+    # launcher's Exec at the absolute kast path.
+    sed -i "s|^Exec=kast |Exec=${BIN_DIR}/kast |" "${DATA_HOME}/applications/kast-center.desktop"
     # GNOME Quick Settings extension — the primary UI.
     install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/extension.js" "${EXT_DIR}/extension.js"
     install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/prefs.js" "${EXT_DIR}/prefs.js"
@@ -114,10 +149,17 @@ remove_legacy_tray() {
 
 enable_services() {
     systemctl --user daemon-reload
-    # The receiver is a LAN-facing listener, so it ships OFF by default: installed
-    # but neither enabled nor started. Turn it on from the Kast tile (or
-    # `kast receiver-start`) only when you actually want to receive.
+    # The receivers are LAN-facing listeners, so they ship OFF by default:
+    # installed but neither enabled nor started. Turn them on from the Kast tile
+    # (or kast receiver-start / audio-receiver-start) only when you want to receive.
     systemctl --user disable uxplay.service >/dev/null 2>&1 || true
+    systemctl --user disable shairport-sync.service >/dev/null 2>&1 || true
+    systemctl --user disable kast-youtube.service >/dev/null 2>&1 || true
+    # The shairport-sync apt package ships an auto-started SYSTEM service; stop it
+    # so it neither listens unexpectedly nor collides with kast's user service.
+    if systemctl list-unit-files shairport-sync.service >/dev/null 2>&1; then
+        sudo systemctl disable --now shairport-sync.service >/dev/null 2>&1 || true
+    fi
     if ! command -v uxplay >/dev/null 2>&1; then
         PACKAGE_STATUS_NOTE="uxplay is not installed yet; the AirPlay receiver is unavailable."
     fi
@@ -151,6 +193,37 @@ enable_desktop_integration() {
     fi
 }
 
+install_youtube_receiver() {
+    # The YouTube DIAL receiver is a small Node app; copy it to the data dir and
+    # fetch its one dependency with npm. Best-effort — never fails the install.
+    local dest="${DATA_HOME}/${APP_ID}/youtube-receiver"
+    install -D -m 644 "${ROOT_DIR}/youtube-receiver/index.mjs" "${dest}/index.mjs"
+    install -D -m 644 "${ROOT_DIR}/youtube-receiver/package.json" "${dest}/package.json"
+    if command -v npm >/dev/null 2>&1; then
+        ( cd "${dest}" && npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) \
+            || PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }YouTube receiver deps failed to install (run: cd ${dest} && npm install)."
+    else
+        PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }npm not found; YouTube receiver needs Node.js (apt install nodejs npm) then re-run install."
+    fi
+}
+
+install_pipx_tools() {
+    # Optional, isolated via pipx (no apt): pyatv = AirPlay video-out + control
+    # center; catt = Chromecast file/URL casting. Best-effort — never fails install.
+    if ! command -v pipx >/dev/null 2>&1; then
+        PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }pipx not found; for AirPlay video-out + Chromecast file-cast install it, then: pipx install pyatv catt."
+        return 0
+    fi
+    if ! { "${HOME}/.local/share/pipx/venvs/pyatv/bin/python" -c 'import pyatv' >/dev/null 2>&1 || python3 -c 'import pyatv' >/dev/null 2>&1; }; then
+        pipx install pyatv >/dev/null 2>&1 \
+            || PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }pyatv install failed; AirPlay video-out unavailable (try: pipx install pyatv)."
+    fi
+    if ! command -v catt >/dev/null 2>&1; then
+        pipx install catt >/dev/null 2>&1 \
+            || PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }catt install failed; Chromecast file-cast unavailable (try: pipx install catt)."
+    fi
+}
+
 if [[ "${SKIP_APT}" -eq 0 ]]; then
     install_packages
 fi
@@ -160,6 +233,8 @@ remove_legacy_tray
 enable_services
 enable_extension
 enable_desktop_integration
+install_pipx_tools
+install_youtube_receiver
 
 if ! grep -Fq "${BIN_DIR}" <<<":${PATH}:"; then
     PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }${BIN_DIR} is not on your PATH; add it to use the 'kast' command directly."

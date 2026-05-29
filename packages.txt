@@ -11,8 +11,19 @@ wpasupplicant
 # Outbound display casting
 gnome-network-displays
 
-# Inbound AirPlay receiver
+# Inbound AirPlay screen mirroring
 uxplay
 
+# Graphical pickers / dialogs (kast pick, AirPlay pairing PIN)
+zenity
+
+# This file is the CORE install only. Optional features pull heavier deps and
+# are installed on request (see install.sh flags), so a plain install stays lean:
+#   --with-airplay-audio  -> shairport-sync          (AirPlay audio receive)
+#   --with-youtube        -> nodejs npm mpv yt-dlp    (YouTube DIAL receive)
+#   --with-all            -> both
+# AirPlay video-out + the control center use pyatv, installed isolated via pipx
+# (no apt packages) on every install when pipx is present.
+#
 # The UI is a GNOME Quick Settings extension (GJS, ships with gnome-shell) —
 # no extra packages needed.
