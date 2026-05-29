@@ -3,6 +3,16 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-29
+
+### Changed
+- **`kast update` is now feature-aware.** It detects the optional receivers you have installed
+  (shairport-sync / the YouTube receiver) and preserves them across the update, and adds
+  `kast update --apt` to also refresh system packages (the default stays sudo-free so the tile's
+  one-click update keeps working).
+- Documentation: README rewritten for the 0.3.x glue-layer surface (receivers, control center,
+  Chromecast file-cast, tiered install, the redesigned tile, GNOME 49–50).
+
 ## [0.3.0] - 2026-05-29
 
 Kast becomes a glue layer across casting protocols, not just a launcher.
@@ -192,6 +202,7 @@ Initial release. A Win+K-style cast panel for GNOME on Ubuntu 25.10.
 - `gnome-network-displays` exposes no connect API, so kast discovers and lists cast
   targets but hands off to its picker to complete the connection.
 
+[0.3.1]: https://github.com/asuramaya/kast/releases/tag/v0.3.1
 [0.3.0]: https://github.com/asuramaya/kast/releases/tag/v0.3.0
 [0.2.0]: https://github.com/asuramaya/kast/releases/tag/v0.2.0
 [0.1.3]: https://github.com/asuramaya/kast/releases/tag/v0.1.3

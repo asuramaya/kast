@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_ID="kast"
-KAST_VERSION="0.3.0"
+KAST_VERSION="0.3.1"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
@@ -1337,8 +1337,25 @@ update_run() {
         printf 'kast is already up to date (v%s)\n' "${KAST_VERSION}"
         return 0
     fi
+
+    # Re-run the latest release's installer, preserving the optional features
+    # already present so an update never silently drops one.
+    local flags=()
+    if command -v shairport-sync >/dev/null 2>&1; then
+        flags+=(--with-airplay-audio)
+    fi
+    if [[ -f "${DATA_HOME}/${APP_ID}/youtube-receiver/index.mjs" ]] && command -v mpv >/dev/null 2>&1; then
+        flags+=(--with-youtube)
+    fi
+    # apt needs sudo, so only touch it when explicitly asked (kast update --apt).
+    # The default refreshes files + the pipx/Node helpers without a sudo prompt,
+    # which is also what the tile's one-click update relies on.
+    if [[ "${1:-}" != "--apt" ]]; then
+        flags+=(--skip-apt)
+    fi
+
     printf 'Updating kast v%s -> v%s ...\n' "${KAST_VERSION}" "${latest}"
-    curl -fsSL "https://raw.githubusercontent.com/${REPO_SLUG}/main/install.sh" | bash -s -- --skip-apt
+    curl -fsSL "https://raw.githubusercontent.com/${REPO_SLUG}/main/install.sh" | bash -s -- "${flags[@]}"
 }
 
 usage() {
@@ -1396,7 +1413,7 @@ Usage:
   kast doctor
   kast repair                            (reinstall pyatv/catt if a Python upgrade broke them)
   kast check-update [--json]
-  kast update
+  kast update [--apt]
   kast version
 EOF
 }
@@ -1587,7 +1604,7 @@ case "${cmd}" in
         if [[ "${1:-}" == "--json" ]]; then check_update_json; else check_update_text; fi
         ;;
     update)
-        update_run
+        update_run "$@"
         ;;
     version|--version|-v)
         printf 'kast %s\n' "${KAST_VERSION}"
