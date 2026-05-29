@@ -555,14 +555,20 @@ repair_run() {
     # User-invokable repair for the pipx-managed helpers.
     local fixed=0
     if [[ -d "${PIPX_PYATV_VENV}" ]] && ! have_pyatv; then
-        repair_pyatv && have_pyatv && { printf 'pyatv: repaired.\n'; fixed=1; } || printf 'pyatv: repair failed (try: pipx reinstall pyatv).\n' >&2
+        if repair_pyatv && have_pyatv; then
+            printf 'pyatv: repaired.\n'; fixed=1
+        else
+            printf 'pyatv: repair failed (try: pipx reinstall pyatv).\n' >&2
+        fi
     elif have_pyatv; then
         printf 'pyatv: ok.\n'
     else
         printf 'pyatv: not installed (pipx install pyatv).\n'
     fi
     if command -v pipx >/dev/null 2>&1 && [[ -d "${HOME}/.local/share/pipx/venvs/catt" ]] && ! command -v catt >/dev/null 2>&1; then
-        pipx reinstall catt >/dev/null 2>&1 && { printf 'catt: repaired.\n'; fixed=1; } || true
+        if pipx reinstall catt >/dev/null 2>&1; then
+            printf 'catt: repaired.\n'; fixed=1
+        fi
     fi
     [[ "${fixed}" -eq 1 ]] || printf 'Nothing to repair.\n'
 }
