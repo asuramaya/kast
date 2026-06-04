@@ -6,7 +6,8 @@
 // resolve a video id and drive mpv, which plays the stream via its bundled
 // yt-dlp hook. No login is needed for public videos.
 //
-// Env: KAST_YT_NAME (advertised name), KAST_YT_MPV (mpv binary), KAST_YT_PORT.
+// Env: KAST_YT_NAME (advertised name), KAST_YT_MPV (mpv binary), KAST_YT_PORT,
+// KAST_YT_DLP (yt-dlp binary for mpv's ytdl_hook; kast keeps it self-updated).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
@@ -16,6 +17,7 @@ import YouTubeCastReceiver, { Player, DataStore } from 'yt-cast-receiver';
 
 const NAME = process.env.KAST_YT_NAME || 'Kast YouTube';
 const MPV = process.env.KAST_YT_MPV || 'mpv';
+const YTDLP = process.env.KAST_YT_DLP || '';
 const PORT = parseInt(process.env.KAST_YT_PORT || '8009', 10);
 const SOCK = path.join(os.tmpdir(), `kast-mpv-${process.pid}.sock`);
 const STATE_DIR = process.env.KAST_YT_STATE
@@ -61,10 +63,13 @@ class Mpv {
 
   async _ensure() {
     if (this._proc && !this._proc.killed) return;
-    this._proc = spawn(MPV, [
+    const args = [
       '--idle=yes', '--force-window=yes', '--keep-open=no',
       '--no-terminal', `--input-ipc-server=${SOCK}`,
-    ], { stdio: 'ignore' });
+    ];
+    // Point mpv's ytdl_hook at kast's self-updating yt-dlp when provided.
+    if (YTDLP) args.push(`--script-opts=ytdl_hook-ytdl_path=${YTDLP}`);
+    this._proc = spawn(MPV, args, { stdio: 'ignore' });
     this._proc.on('exit', () => { this._proc = null; this._sock = null; });
     await this._connect();
   }
