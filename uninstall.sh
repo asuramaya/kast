@@ -86,6 +86,7 @@ remove_files() {
     rm -rf "${DATA_HOME:?}/${APP_ID:?}" "${DATA_HOME:?}/ctrlk-cast"
     rm -rf "${DATA_HOME:?}/gnome-shell/extensions/kast@asuramaya"
     rm -f "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
+    rm -f "${DATA_HOME}/dbus-1/services/org.gnome.NetworkDisplays.Daemon.service"
 }
 
 remove_shortcut() {

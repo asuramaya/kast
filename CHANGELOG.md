@@ -3,6 +3,18 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **D-Bus activation for the display daemon.** Kast installs an activation file
+  (`~/.local/share/dbus-1/services/org.gnome.NetworkDisplays.Daemon.service`) so the session bus
+  starts `gnome-network-displays-daemon` on demand for one-click connect, instead of Kast spawning
+  it. A runtime fallback still spawns the daemon directly when activation isn't available.
+- **Self-updating yt-dlp.** The YouTube receiver now uses a user-local `yt-dlp` that Kast keeps
+  current (pre-seeded at install, refreshed at most daily in the background, with `yt-dlp -U`), and
+  points mpv's `ytdl_hook` at it — so YouTube changes heal without an apt upgrade. A system `yt-dlp`
+  is used as a fallback when the managed copy is unavailable. `kast doctor` reports which is in use.
+
 ## [0.3.1] - 2026-05-29
 
 ### Changed

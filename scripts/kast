@@ -25,6 +25,13 @@ GND_DEST="org.gnome.NetworkDisplays.Daemon"
 GND_OBJ="/org/gnome/NetworkDisplays/Manager"
 GND_IFACE="org.gnome.NetworkDisplays.Manager"
 GND_STREAM_FILE="${STATE_HOME}/${APP_ID}/gnd-stream-unit"
+# A self-updating, user-local yt-dlp keeps the YouTube receiver working when
+# YouTube changes, without waiting on an apt upgrade. mpv's ytdl_hook is pointed
+# at this copy; a system yt-dlp is used as a fallback when it's unavailable.
+YT_DLP_BIN="${DATA_HOME}/${APP_ID}/bin/yt-dlp"
+YT_DLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+YT_DLP_STAMP="${STATE_HOME}/${APP_ID}/yt-dlp-checked"
+YT_DLP_MAX_AGE=86400
 
 die() {
     printf '%s\n' "$*" >&2
@@ -757,11 +764,17 @@ gnd_daemon_installed() { command -v "${GND_DAEMON_BIN}" >/dev/null 2>&1; }
 gnd_bus_up() { busctl --user list 2>/dev/null | grep -q "${GND_DEST}"; }
 
 gnd_daemon_ensure() {
-    # Reachable on the session bus, spawning the daemon if needed. There is no
-    # D-Bus .service activation file yet, so kast starts it. Returns non-zero if
-    # the daemon isn't installed (caller then falls back to the GUI).
+    # Reachable on the session bus. kast installs a D-Bus activation file, so
+    # ask the bus to start the daemon on demand; if that's unavailable (older
+    # install, or the daemon moved), fall back to spawning it ourselves.
+    # Returns non-zero if the daemon isn't installed (caller falls back to GUI).
     gnd_daemon_installed || return 1
     gnd_bus_up && return 0
+    # Bus activation via the installed .service file.
+    busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus StartServiceByName su "${GND_DEST}" 0 >/dev/null 2>&1
+    gnd_bus_up && return 0
+    # Fallback: no activation file or it failed — start the daemon directly.
     setsid "${GND_DAEMON_BIN}" >/dev/null 2>&1 </dev/null &
     disown 2>/dev/null || true
     local i
@@ -1185,13 +1198,66 @@ find_node() {
     return 1
 }
 
+yt_dlp_stamp_now() {
+    ensure_state_dir
+    : > "${YT_DLP_STAMP}"
+}
+
+yt_dlp_download() {
+    # Fetch the latest standalone yt-dlp into the managed path (atomic replace).
+    command -v curl >/dev/null 2>&1 || return 1
+    mkdir -p "$(dirname "${YT_DLP_BIN}")"
+    local tmp="${YT_DLP_BIN}.new"
+    if curl -fsSL "${YT_DLP_URL}" -o "${tmp}"; then
+        chmod +x "${tmp}"
+        mv -f "${tmp}" "${YT_DLP_BIN}"
+        yt_dlp_stamp_now
+        return 0
+    fi
+    rm -f "${tmp}"
+    return 1
+}
+
+yt_dlp_path() {
+    # Resolve which yt-dlp the receiver should use: the managed copy if present,
+    # downloading it once if missing; otherwise a system yt-dlp. Prints the path,
+    # or returns non-zero if none is available (mpv then uses its own default).
+    if [[ ! -x "${YT_DLP_BIN}" ]]; then
+        yt_dlp_download >/dev/null 2>&1 || true
+    fi
+    if [[ -x "${YT_DLP_BIN}" ]]; then
+        printf '%s\n' "${YT_DLP_BIN}"
+        return 0
+    fi
+    command -v yt-dlp 2>/dev/null
+}
+
+yt_dlp_refresh() {
+    # Throttled self-update of the managed binary (daily at most), in the
+    # background so it never delays playback. yt-dlp -U updates the standalone
+    # binary in place; re-download if that path isn't updatable.
+    [[ -x "${YT_DLP_BIN}" ]] || return 0
+    local now mtime
+    if [[ -f "${YT_DLP_STAMP}" ]]; then
+        now="$(date +%s)"
+        mtime="$(stat -c %Y "${YT_DLP_STAMP}" 2>/dev/null || echo 0)"
+        (( now - mtime < YT_DLP_MAX_AGE )) && return 0
+    fi
+    yt_dlp_stamp_now
+    ( "${YT_DLP_BIN}" -U >/dev/null 2>&1 || yt_dlp_download >/dev/null 2>&1 ) &
+    disown 2>/dev/null || true
+}
+
 youtube_receiver_run() {
     load_conf
-    local node
+    local node ytdlp
     node="$(find_node)" || die "Node.js is required for the YouTube receiver (apt install nodejs)"
     [[ -f "${YT_RECEIVER_DIR}/index.mjs" ]] || die "YouTube receiver not installed; re-run ./install.sh"
     command -v mpv >/dev/null 2>&1 || die "mpv is required to play YouTube casts (apt install mpv)"
+    ytdlp="$(yt_dlp_path || true)"
+    yt_dlp_refresh
     export KAST_YT_NAME="${YT_RECEIVER_NAME:-Kast YouTube}"
+    [[ -n "${ytdlp}" ]] && export KAST_YT_DLP="${ytdlp}"
     exec "${node}" "${YT_RECEIVER_DIR}/index.mjs"
 }
 
@@ -1242,8 +1308,15 @@ doctor_run() {
     if systemctl --user is-active --quiet shairport-sync.service 2>/dev/null; then mark ok "AirPlay audio receiver running"; else mark ok "AirPlay audio receiver off (enable from the Kast tile)"; fi
     if [[ -f "${YT_RECEIVER_DIR}/index.mjs" ]] && find_node >/dev/null 2>&1 && have mpv; then
         mark ok "YouTube DIAL receiver ready (node + mpv)"
+        if [[ -x "${YT_DLP_BIN}" ]]; then
+            mark ok "yt-dlp self-updating (managed: ${YT_DLP_BIN})"
+        elif have yt-dlp; then
+            mark ok "yt-dlp present (system; kast will self-manage on first cast)"
+        else
+            mark warn "yt-dlp not found" "needs curl to fetch it, or: apt install yt-dlp"
+        fi
     elif [[ -f "${YT_RECEIVER_DIR}/index.mjs" ]]; then
-        mark warn "YouTube receiver needs node + mpv" "apt install nodejs mpv (and yt-dlp); then re-run ./install.sh"
+        mark warn "YouTube receiver needs node + mpv" "apt install nodejs mpv; then re-run ./install.sh"
     else
         mark warn "YouTube receiver not installed" "re-run ./install.sh with node + npm present"
     fi

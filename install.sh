@@ -114,6 +114,19 @@ install_packages() {
     sudo apt-get install -y -- "${packages[@]}"
 }
 
+install_gnd_dbus_service() {
+    # D-Bus activation file so the session bus starts gnome-network-displays-daemon
+    # on demand (first one-click connect), instead of kast spawning it itself.
+    # Generated at install time so Exec points at the daemon's real path. Skipped
+    # when the daemon isn't present; kast's runtime fallback still spawns it.
+    local daemon_bin svc
+    daemon_bin="$(command -v gnome-network-displays-daemon 2>/dev/null || true)"
+    [[ -n "${daemon_bin}" ]] || return 0
+    svc="${DATA_HOME}/dbus-1/services/org.gnome.NetworkDisplays.Daemon.service"
+    install -D -m 644 "${ROOT_DIR}/dbus/org.gnome.NetworkDisplays.Daemon.service" "${svc}"
+    sed -i "s|@DAEMON_BIN@|${daemon_bin}|" "${svc}"
+}
+
 install_user_files() {
     mkdir -p "${BIN_DIR}"
     install -D -m 644 "${ROOT_DIR}/config/pipewire/50-raop.conf" "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
@@ -128,6 +141,7 @@ install_user_files() {
     install -D -m 644 "${ROOT_DIR}/systemd/user/uxplay.service" "${CONFIG_HOME}/systemd/user/uxplay.service"
     install -D -m 644 "${ROOT_DIR}/systemd/user/shairport-sync.service" "${CONFIG_HOME}/systemd/user/shairport-sync.service"
     install -D -m 644 "${ROOT_DIR}/systemd/user/kast-youtube.service" "${CONFIG_HOME}/systemd/user/kast-youtube.service"
+    install_gnd_dbus_service
     install -D -m 644 "${ROOT_DIR}/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
     # The desktop session's PATH may not include ~/.local/bin, so point the
     # launcher's Exec at the absolute kast path.
@@ -204,6 +218,18 @@ install_youtube_receiver() {
             || PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }YouTube receiver deps failed to install (run: cd ${dest} && npm install)."
     else
         PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }npm not found; YouTube receiver needs Node.js (apt install nodejs npm) then re-run install."
+    fi
+    # Pre-seed kast's self-updating yt-dlp so the first cast doesn't wait on a
+    # download. Best-effort; the receiver fetches/refreshes it at runtime too.
+    if command -v curl >/dev/null 2>&1; then
+        local yt_dlp_bin="${DATA_HOME}/${APP_ID}/bin/yt-dlp"
+        mkdir -p "$(dirname "${yt_dlp_bin}")"
+        if curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" -o "${yt_dlp_bin}.new"; then
+            chmod +x "${yt_dlp_bin}.new"
+            mv -f "${yt_dlp_bin}.new" "${yt_dlp_bin}"
+        else
+            rm -f "${yt_dlp_bin}.new"
+        fi
     fi
 }
 

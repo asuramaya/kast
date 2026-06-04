@@ -233,15 +233,15 @@ GNOME 49–50 support, and tiered/self-healing dependencies.
 Known limitations:
 
 - One-click display connect needs `gnome-network-displays` **≥ 0.99.0** (ships the D-Bus daemon;
-  Ubuntu 26.04 has it). On older versions Kast falls back to the GUI picker. There's no D-Bus
-  `.service` activation file yet, so Kast spawns the daemon itself.
+  Ubuntu 26.04 has it). On older versions Kast falls back to the GUI picker. Kast installs a D-Bus
+  activation file so the session bus starts the daemon on demand, with a runtime fallback that
+  spawns it directly if activation isn't available.
 - AirPlay/Chromecast video-out streams a **file or URL**, not live screen mirroring.
 - Discovery is passive mDNS (timer-refreshed) for Chromecast/AirPlay; Miracast is an on-demand
   Wi-Fi P2P find (shares the radio), so it's never auto-polled.
-- The YouTube receiver depends on `yt-dlp`, which YouTube changes break periodically — keep it
-  current.
-
-Next ideas: adopt `gnome-network-displays` v1.0.0's activatable daemon service when it lands.
+- The YouTube receiver depends on `yt-dlp`; Kast keeps a self-updating user-local copy (refreshed
+  daily) and points mpv at it, so YouTube changes heal without an apt upgrade. Needs `curl` to
+  fetch it; a system `yt-dlp` is used as a fallback.
 
 Out of scope: **AirPlay live screen mirroring out** (needs FairPlay/MFi auth — the only Linux
 sender, `doubletake`, runs extracted Apple code and is too new/licensing-fraught to bundle);
