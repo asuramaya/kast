@@ -3,6 +3,59 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **mpv IPC socket moved out of shared `/tmp`.** The YouTube receiver's mpv control socket now lives
+  in a private `0700` directory under `XDG_RUNTIME_DIR`; previously it sat in world-traversable
+  `/tmp`, where any local user could connect and drive mpv (load local files, screenshot to
+  arbitrary paths, read state) or exhaust memory. The IPC read buffer is now bounded too.
+- **yt-dlp downloads are SHA-256 verified.** Both the install-time pre-seed and the runtime refresh
+  now verify the binary against the release's published `SHA2-256SUMS` before trusting/executing it,
+  and the unverified `yt-dlp -U` self-update was replaced with a verified re-download (serialized
+  with `flock`, written via a random temp + atomic rename).
+- **YouTube video ids are validated.** The receiver rejects anything but a `^[A-Za-z0-9_-]{11}$` id
+  before building the playback URL, closing the only attacker-controlled-input-to-mpv path (the
+  DIAL endpoint is unauthenticated).
+- **Cast target hardening.** Chromecast device names/media beginning with `-` are refused (catt
+  argument injection) and AirPlay target addresses are validated as literal IPs before use.
+- **systemd receiver units hardened** with `NoNewPrivileges=yes` and a `RestrictAddressFamilies`
+  allowlist.
+- **Installer hardening.** The `curl | bash` bootstrap now warns loudly before falling back to the
+  unreviewed `main` branch (refusable with `KAST_NO_UNSTABLE=1`), `sed` substitutions are escaped,
+  and Node deps install via `npm ci` against a shipped lockfile.
+
+### Fixed
+- **Kast no longer discovers its own receiver as a cast target.** The AirPlay screen receiver
+  (uxplay) advertises on the LAN, so the box was listing itself — once per network interface — in
+  "Cast to…", offering to cast to itself. Discovered Chromecast/AirPlay targets resolving to any of
+  this host's own IP addresses are now filtered out. Other kast boxes on the LAN are unaffected.
+- **mpv is no longer orphaned on shutdown.** SIGTERM/SIGINT now kill the spawned mpv, so restarts
+  don't leak an mpv process, window, and stale socket each time.
+- **Prefs no longer discards hand-edited config.** Saving from the preferences dialog now patches
+  the existing `uxplay.conf` in place, preserving `SHAIRPORT_ARGS`, comments, and any other manual
+  lines (they were previously wiped), and stops freezing the host-qualified default name into the
+  file so it stays correct after a hostname change. The `DataStore` also writes atomically, and the
+  play start-offset is applied via a version-stable mpv property.
+
+### Added
+- **Settable AirPlay PIN.** Kast preferences now has a "PIN code" field under "Require PIN": leave
+  it blank for uxplay's per-connection random PIN (shown on the receiving screen), or set a fixed
+  4-digit code to hand out. Previously the toggle only enabled the random PIN with no way to pin or
+  read it.
+- **YouTube receiver no longer hides when it can't run.** When Node.js or mpv is missing the tile
+  used to silently drop the YouTube switch; it now shows what's needed (e.g. "YouTube — needs
+  Node.js + mpv") so the feature is discoverable. Backed by a `reason` field in `kast status --json`.
+
+### Changed
+- **Host-qualified receiver names by default.** The AirPlay screen/audio and YouTube receivers now
+  advertise a host-qualified name out of the box (e.g. "Kast Receiver (hostname)") so two kast boxes
+  on the same LAN are distinguishable in a sender's picker. An explicit name in the config still
+  wins. (mDNS already disambiguates the service on collision; this fixes the human-facing name.)
+- **Clearer fullscreen setting.** The receiver "Mode" combo (Mirror / Video overlay) is now a plain
+  "Fullscreen" switch — same underlying `set-mode`, but it states what it does for the received
+  screen.
+
 ## [0.4.0] - 2026-06-04
 
 ### Added

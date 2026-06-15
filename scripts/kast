@@ -30,7 +30,11 @@ GND_STREAM_FILE="${STATE_HOME}/${APP_ID}/gnd-stream-unit"
 # at this copy; a system yt-dlp is used as a fallback when it's unavailable.
 YT_DLP_BIN="${DATA_HOME}/${APP_ID}/bin/yt-dlp"
 YT_DLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+# Published checksums for the release, used to verify the binary before trusting
+# it (the download is executable code mpv runs, so integrity matters).
+YT_DLP_SUMS_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS"
 YT_DLP_STAMP="${STATE_HOME}/${APP_ID}/yt-dlp-checked"
+YT_DLP_LOCK="${STATE_HOME}/${APP_ID}/yt-dlp.lock"
 YT_DLP_MAX_AGE=86400
 
 die() {
@@ -42,12 +46,28 @@ need() {
     command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
 
+valid_ip() {
+    # A literal IPv4 or IPv6 address. Discovered target addresses come from mDNS
+    # (attacker-controlled on a hostile LAN), so validate before handing one to a
+    # backend — this rejects a leading '-' (option injection) and anything with
+    # whitespace or shell metacharacters.
+    [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || [[ "$1" =~ ^[0-9A-Fa-f:]+$ ]]
+}
+
 load_conf() {
-    UXPLAY_NAME="Kast Receiver"
+    # Default the advertised names to a host-qualified form so two kast boxes on
+    # the same LAN don't show up as identical entries in a sender's picker. mDNS
+    # already disambiguates the service on collision (it appends " (2)"), but the
+    # human-facing name would otherwise be the same on both. An explicit name in
+    # the conf still wins.
+    local host="${HOSTNAME:-}"
+    [[ -n "${host}" ]] || host="$(hostname 2>/dev/null || true)"
+    host="${host%%.*}"
+    UXPLAY_NAME="Kast Receiver${host:+ (${host})}"
     UXPLAY_ARGS=()
-    SHAIRPORT_NAME="Kast Audio"
+    SHAIRPORT_NAME="Kast Audio${host:+ (${host})}"
     SHAIRPORT_ARGS=()
-    YT_RECEIVER_NAME="Kast YouTube"
+    YT_RECEIVER_NAME="Kast YouTube${host:+ (${host})}"
     if [[ -f "${CONF_FILE}" ]]; then
         # shellcheck disable=SC1090
         source "${CONF_FILE}"
@@ -213,12 +233,26 @@ status_json() {
     if command -v shairport-sync >/dev/null 2>&1; then
         audio_installed="true"
     fi
-    local yt_active="false" yt_installed="false"
+    local yt_active="false" yt_installed="false" yt_reason=""
     if systemctl --user is-active --quiet kast-youtube.service 2>/dev/null; then
         yt_active="true"
     fi
-    if [[ -f "${DATA_HOME}/${APP_ID}/youtube-receiver/index.mjs" ]] && find_node >/dev/null 2>&1 && command -v mpv >/dev/null 2>&1; then
-        yt_installed="true"
+    if [[ -f "${DATA_HOME}/${APP_ID}/youtube-receiver/index.mjs" ]]; then
+        # The app ships with every install; node + mpv are the opt-in apt deps.
+        # When one is missing the receiver can't run, so report exactly what's
+        # needed instead of silently dropping the feature from the UI.
+        local yt_missing=()
+        find_node >/dev/null 2>&1 || yt_missing+=("Node.js")
+        command -v mpv >/dev/null 2>&1 || yt_missing+=("mpv")
+        if [[ "${#yt_missing[@]}" -eq 0 ]]; then
+            yt_installed="true"
+        elif [[ "${#yt_missing[@]}" -eq 1 ]]; then
+            yt_reason="needs ${yt_missing[0]}"
+        else
+            yt_reason="needs ${yt_missing[0]} + ${yt_missing[1]}"
+        fi
+    else
+        yt_reason="re-run install"
     fi
     if command -v gnome-network-displays >/dev/null 2>&1; then
         display_installed="true"
@@ -248,6 +282,7 @@ status_json() {
         --arg yt_name "${YT_RECEIVER_NAME:-Kast YouTube}" \
         --arg yt_active "${yt_active}" \
         --arg yt_installed "${yt_installed}" \
+        --arg yt_reason "${yt_reason}" \
         --arg catt_installed "$(have_catt && printf true || printf false)" \
         --arg mirror_mode "$(get_mode)" \
         --argjson sinks "${sinks_json}" \
@@ -268,7 +303,8 @@ status_json() {
             youtube_receiver: {
                 name: $yt_name,
                 active: ($yt_active == "true"),
-                installed: ($yt_installed == "true")
+                installed: ($yt_installed == "true"),
+                reason: (if $yt_reason == "" then null else $yt_reason end)
             },
             outbound: {
                 display_cast_installed: ($display_installed == "true"),
@@ -367,6 +403,25 @@ reconnect_wifi() {
     fi
 }
 
+local_addresses_json() {
+    # This host's own IPv4 addresses, as a JSON array. kast's AirPlay screen
+    # receiver (uxplay) advertises _airplay._tcp on the LAN, so without this the
+    # box discovers its own receiver as a cast target — once per interface — and
+    # offers to cast to itself. Targets resolving to one of these addresses are
+    # filtered out of discovery.
+    local addrs
+    if command -v ip >/dev/null 2>&1; then
+        addrs="$(ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+    elif command -v hostname >/dev/null 2>&1; then
+        addrs="$(hostname -I 2>/dev/null | tr ' ' '\n')"
+    else
+        printf '[]\n'
+        return 0
+    fi
+    printf '%s\n' "${addrs}" \
+        | jq -R -s 'split("\n") | map(select(length > 0)) | unique'
+}
+
 cast_targets_json() {
     need jq
     # Chromecast / Google Cast devices advertise over mDNS as _googlecast._tcp.
@@ -377,6 +432,8 @@ cast_targets_json() {
         printf '[]\n'
         return 0
     fi
+    local locals
+    locals="$(local_addresses_json)"
     avahi-browse -rpt _googlecast._tcp 2>/dev/null \
         | LC_ALL=C awk -F';' '
             function unesc(s,    out, i, c, code) {
@@ -413,12 +470,13 @@ cast_targets_json() {
                 printf "%s\t%s\t%s\n", disp, addr, port;
             }
         ' \
-        | jq -R -s '
+        | jq -R -s --argjson locals "${locals}" '
             [ split("\n")[]
               | select(length > 0)
               | split("\t")
               | { name: .[0], address: .[1], port: (.[2] | tonumber? // null), protocol: "chromecast" }
             ]
+            | map(select((.address | IN($locals[])) | not))
             | unique_by(.address)
         '
 }
@@ -589,6 +647,8 @@ airplay_targets_json() {
         printf '[]\n'
         return 0
     fi
+    local locals
+    locals="$(local_addresses_json)"
     avahi-browse -rpt _airplay._tcp 2>/dev/null \
         | LC_ALL=C awk -F';' '
             function unesc(s,    out, i, c, code) {
@@ -623,7 +683,7 @@ airplay_targets_json() {
                 printf "%s\t%s\t%s\t%s\n", disp, addr, port, devid;
             }
         ' \
-        | jq -R -s '
+        | jq -R -s --argjson locals "${locals}" '
             [ split("\n")[]
               | select(length > 0)
               | split("\t")
@@ -631,6 +691,7 @@ airplay_targets_json() {
                   identifier: (if .[3] == "" then null else .[3] end),
                   protocol: "airplay" }
             ]
+            | map(select((.address | IN($locals[])) | not))
             | unique_by(.address)
         '
 }
@@ -664,6 +725,7 @@ airplay_cast() {
     resolved="$(resolve_airplay_target "${target}")"
     [[ -n "${resolved}" ]] || die "No AirPlay receiver matching '${target}'. List them with: kast airplay-targets"
     addr="${resolved%%$'\t'*}"
+    valid_ip "${addr}" || die "Refusing non-IP AirPlay address: ${addr}"
 
     ensure_state_dir
     local subcmd py
@@ -1053,6 +1115,11 @@ chromecast_cast() {
     local name="$1" media="$2"
     [[ -n "${name}" && -n "${media}" ]] || die "usage: kast cast-file <chromecast> <url-or-file>"
     have_catt || die "catt is required to cast files to Chromecast. Install it with:  pipx install catt"
+    # The device name comes from mDNS (attacker-controlled). catt has no `--`
+    # separator, so a name/media beginning with '-' would be parsed as an option
+    # (argument injection). Reject that rather than pass it through.
+    [[ "${name}" == -* ]] && die "Refusing Chromecast device name starting with '-': ${name}"
+    [[ "${media}" == -* ]] && die "Refusing media argument starting with '-': ${media}"
     if [[ ! "${media}" =~ ^https?:// ]]; then
         [[ -f "${media}" ]] || die "File not found: ${media}"
     fi
@@ -1204,18 +1271,30 @@ yt_dlp_stamp_now() {
 }
 
 yt_dlp_download() {
-    # Fetch the latest standalone yt-dlp into the managed path (atomic replace).
+    # Fetch the latest standalone yt-dlp and verify it against the release's
+    # published SHA-256 before trusting it (the binary is code mpv will run, so
+    # a tampered/MITM'd download must not be accepted). Uses a random in-dir temp
+    # so concurrent runs can't clobber each other; the final mv is atomic.
     command -v curl >/dev/null 2>&1 || return 1
+    command -v sha256sum >/dev/null 2>&1 || return 1
     mkdir -p "$(dirname "${YT_DLP_BIN}")"
-    local tmp="${YT_DLP_BIN}.new"
-    if curl -fsSL "${YT_DLP_URL}" -o "${tmp}"; then
-        chmod +x "${tmp}"
-        mv -f "${tmp}" "${YT_DLP_BIN}"
-        yt_dlp_stamp_now
-        return 0
+    local tmp want got
+    tmp="$(mktemp "${YT_DLP_BIN}.XXXXXX")" || return 1
+    if ! curl -fsSL "${YT_DLP_URL}" -o "${tmp}"; then
+        rm -f "${tmp}"
+        return 1
     fi
-    rm -f "${tmp}"
-    return 1
+    # The SHA2-256SUMS file lists "<hash>  <asset>"; match the exact asset name.
+    want="$(curl -fsSL "${YT_DLP_SUMS_URL}" 2>/dev/null | awk '$2 == "yt-dlp" { print $1; exit }')"
+    got="$(sha256sum "${tmp}" | awk '{ print $1 }')"
+    if [[ -z "${want}" || "${want}" != "${got}" ]]; then
+        rm -f "${tmp}"
+        return 1
+    fi
+    chmod +x "${tmp}"
+    mv -f "${tmp}" "${YT_DLP_BIN}"
+    yt_dlp_stamp_now
+    return 0
 }
 
 yt_dlp_path() {
@@ -1233,9 +1312,11 @@ yt_dlp_path() {
 }
 
 yt_dlp_refresh() {
-    # Throttled self-update of the managed binary (daily at most), in the
-    # background so it never delays playback. yt-dlp -U updates the standalone
-    # binary in place; re-download if that path isn't updatable.
+    # Throttled refresh of the managed binary (daily at most), in the background
+    # so it never delays playback. We re-download-and-verify rather than `yt-dlp
+    # -U`: self-update would replace the binary from the binary's own logic,
+    # outside our checksum check. An flock serializes concurrent refreshes so two
+    # casts don't both fetch at once.
     [[ -x "${YT_DLP_BIN}" ]] || return 0
     local now mtime
     if [[ -f "${YT_DLP_STAMP}" ]]; then
@@ -1244,7 +1325,11 @@ yt_dlp_refresh() {
         (( now - mtime < YT_DLP_MAX_AGE )) && return 0
     fi
     yt_dlp_stamp_now
-    ( "${YT_DLP_BIN}" -U >/dev/null 2>&1 || yt_dlp_download >/dev/null 2>&1 ) &
+    if command -v flock >/dev/null 2>&1; then
+        ( flock -n 9 || exit 0; yt_dlp_download >/dev/null 2>&1 ) 9>"${YT_DLP_LOCK}" &
+    else
+        ( yt_dlp_download >/dev/null 2>&1 ) &
+    fi
     disown 2>/dev/null || true
 }
 

@@ -1,13 +1,24 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const CONF_DIR = GLib.build_filenamev([GLib.get_user_config_dir(), 'kast']);
 const CONF_PATH = GLib.build_filenamev([CONF_DIR, 'uxplay.conf']);
 const CLI_PATH = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'kast']);
+
+// The CLI computes a host-qualified default name at runtime whenever the conf
+// doesn't set one. We mirror those defaults so prefs shows the same value, and
+// so we only persist a name line when the user actually customizes it (writing
+// the literal would otherwise freeze the name to the hostname-at-save-time).
+const HOST = (GLib.get_host_name() || '').split('.')[0];
+const SUFFIX = HOST ? ` (${HOST})` : '';
+const DEFAULT_NAMES = {
+    UXPLAY_NAME: `Kast Receiver${SUFFIX}`,
+    SHAIRPORT_NAME: `Kast Audio${SUFFIX}`,
+    YT_RECEIVER_NAME: `Kast YouTube${SUFFIX}`,
+};
 
 // kast's runtime config is a bash-sourced file (the CLI reads it), so prefs.js
 // reads and rewrites that same file rather than introducing a GSettings schema.
@@ -20,25 +31,29 @@ function readConf() {
     } catch (_e) {
         // No config yet — fall back to defaults below.
     }
-    const name = (text.match(/UXPLAY_NAME="([^"]*)"/) || [, 'Kast Receiver'])[1];
-    const audioName = (text.match(/SHAIRPORT_NAME="([^"]*)"/) || [, 'Kast Audio'])[1];
-    const ytName = (text.match(/YT_RECEIVER_NAME="([^"]*)"/) || [, 'Kast YouTube'])[1];
+    // Show the CLI's host-qualified default when the conf doesn't set a name.
+    const name = (text.match(/UXPLAY_NAME="([^"]*)"/) || [, DEFAULT_NAMES.UXPLAY_NAME])[1];
+    const audioName = (text.match(/SHAIRPORT_NAME="([^"]*)"/) || [, DEFAULT_NAMES.SHAIRPORT_NAME])[1];
+    const ytName = (text.match(/YT_RECEIVER_NAME="([^"]*)"/) || [, DEFAULT_NAMES.YT_RECEIVER_NAME])[1];
     const argsRaw = (text.match(/UXPLAY_ARGS=\(([^)]*)\)/) || [, ''])[1];
     const tokens = argsRaw.trim().split(/\s+/).filter(t => t.length > 0);
+    const pinIdx = tokens.indexOf('-pin');
+    const pinCode = (pinIdx >= 0 && /^\d+$/.test(tokens[pinIdx + 1] || '')) ? tokens[pinIdx + 1] : '';
     return {
         name,
         audioName,
         ytName,
         tokens,
         h265: tokens.includes('-h265'),
-        pin: tokens.includes('-pin'),
+        pin: pinIdx >= 0,
+        pinCode,
         dropWifi: /KAST_DROP_WIFI_DEFAULT=1/.test(text),
     };
 }
 
 // Rebuild UXPLAY_ARGS, preserving any custom flags the user added by hand while
 // toggling the ones we manage (-h265, -pin and its optional numeric value).
-function buildArgs(tokens, {h265, pin}) {
+function buildArgs(tokens, {h265, pin, pinCode}) {
     const out = [];
     for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i];
@@ -53,8 +68,13 @@ function buildArgs(tokens, {h265, pin}) {
     }
     if (h265)
         out.push('-h265');
-    if (pin)
+    if (pin) {
+        // Bare -pin makes uxplay show a random PIN on the receiving screen each
+        // time; "-pin <digits>" pins a fixed code the user can hand out.
         out.push('-pin');
+        if (/^\d+$/.test(pinCode || ''))
+            out.push(pinCode);
+    }
     return out;
 }
 
@@ -71,19 +91,53 @@ function safeToken(token) {
     return /^[A-Za-z0-9_=.:@x/+-]+$/.test(token);
 }
 
+// Upsert a `KEY=...` assignment in the conf text, replacing the existing line if
+// present or appending otherwise. Preserves comments and any unmanaged lines
+// (e.g. a hand-set SHAIRPORT_ARGS), so a prefs save never silently drops them.
+function upsertAssign(text, key, line) {
+    const re = new RegExp(`^${key}=.*$`, 'm');
+    if (re.test(text))
+        return text.replace(re, line);
+    return `${text.replace(/\n*$/, '\n')}${line}\n`;
+}
+
+function removeAssign(text, key) {
+    return text.replace(new RegExp(`^${key}=.*\\n?`, 'm'), '');
+}
+
 function writeConf(state) {
+    let text = '';
+    try {
+        const [ok, bytes] = GLib.file_get_contents(CONF_PATH);
+        if (ok)
+            text = new TextDecoder().decode(bytes);
+    } catch (_e) {
+        // No existing conf — start from a documented header below.
+    }
+    if (!text.trim()) {
+        text = '# shellcheck shell=bash\n' +
+            '# Managed by Kast preferences. Lines not shown are preserved on save.\n\n';
+    }
+
     const args = buildArgs(state.tokens, state).filter(safeToken);
-    const text = [
-        '# shellcheck shell=bash',
-        '# Managed by Kast preferences. Custom UXPLAY_ARGS flags are preserved.',
-        '',
-        `UXPLAY_NAME="${sanitizeName(state.name)}"`,
-        `UXPLAY_ARGS=(${args.join(' ')})`,
-        `SHAIRPORT_NAME="${sanitizeName(state.audioName)}"`,
-        `YT_RECEIVER_NAME="${sanitizeName(state.ytName)}"`,
-        `KAST_DROP_WIFI_DEFAULT=${state.dropWifi ? 1 : 0}`,
-        '',
-    ].join('\n');
+    text = upsertAssign(text, 'UXPLAY_ARGS', `UXPLAY_ARGS=(${args.join(' ')})`);
+    text = upsertAssign(text, 'KAST_DROP_WIFI_DEFAULT', `KAST_DROP_WIFI_DEFAULT=${state.dropWifi ? 1 : 0}`);
+
+    // Names: persist a line only when the user customized it (differs from the
+    // host-qualified default). Otherwise drop the line so the CLI keeps computing
+    // the dynamic default — which stays correct if the box is later renamed.
+    for (const [key, value] of [
+        ['UXPLAY_NAME', state.name],
+        ['SHAIRPORT_NAME', state.audioName],
+        ['YT_RECEIVER_NAME', state.ytName],
+    ]) {
+        const clean = sanitizeName(value);
+        if (clean && clean !== DEFAULT_NAMES[key])
+            text = upsertAssign(text, key, `${key}="${clean}"`);
+        else
+            text = removeAssign(text, key);
+    }
+
     try {
         GLib.mkdir_with_parents(CONF_DIR, 0o755);
         GLib.file_set_contents(CONF_PATH, new TextEncoder().encode(text));
@@ -139,16 +193,15 @@ export default class KastPreferences extends ExtensionPreferences {
         });
         screen.add(nameRow);
 
-        const modeRow = new Adw.ComboRow({
-            title: 'Mode',
-            subtitle: 'How the received screen is shown',
-            model: Gtk.StringList.new(['Mirror', 'Video overlay (fullscreen)']),
+        const fullscreenRow = new Adw.SwitchRow({
+            title: 'Fullscreen',
+            subtitle: 'Show the received screen fullscreen instead of in a window',
         });
-        modeRow.selected = getMode() === 'video-overlay' ? 1 : 0;
-        modeRow.connect('notify::selected', () => {
-            runCli(['set-mode', modeRow.selected === 1 ? 'video-overlay' : 'mirror']);
+        fullscreenRow.active = getMode() === 'video-overlay';
+        fullscreenRow.connect('notify::active', () => {
+            runCli(['set-mode', fullscreenRow.active ? 'video-overlay' : 'mirror']);
         });
-        screen.add(modeRow);
+        screen.add(fullscreenRow);
 
         const h265Row = new Adw.SwitchRow({
             title: 'H.265 video',
@@ -163,14 +216,36 @@ export default class KastPreferences extends ExtensionPreferences {
 
         const pinRow = new Adw.SwitchRow({
             title: 'Require PIN',
-            subtitle: 'Prompt for a PIN before a client can mirror',
+            subtitle: 'A sender must enter a PIN before it can mirror',
         });
         pinRow.active = state.pin;
-        pinRow.connect('notify::active', () => {
-            state.pin = pinRow.active;
+        screen.add(pinRow);
+
+        // Optional fixed PIN. Left blank, uxplay shows a fresh random 4-digit
+        // PIN on the receiving screen for each connection; set one here to hand
+        // out a code instead.
+        const pinCodeRow = new Adw.EntryRow({
+            title: 'PIN code (blank = random, shown on screen)',
+        });
+        pinCodeRow.text = state.pinCode;
+        pinCodeRow.set_sensitive(state.pin);
+        pinCodeRow.connect('changed', () => {
+            // uxplay PINs are 4 digits; keep only those, ignore the rest.
+            const digits = pinCodeRow.text.replace(/\D/g, '').slice(0, 4);
+            if (digits !== pinCodeRow.text) {
+                pinCodeRow.text = digits;
+                return; // re-enters with the cleaned value, which saves below
+            }
+            state.pinCode = digits;
             save();
         });
-        screen.add(pinRow);
+        screen.add(pinCodeRow);
+
+        pinRow.connect('notify::active', () => {
+            state.pin = pinRow.active;
+            pinCodeRow.set_sensitive(pinRow.active);
+            save();
+        });
 
         const restartRow = new Adw.ButtonRow({title: 'Restart receiver to apply'});
         restartRow.connect('activated', () => runCli(['receiver-restart']));
