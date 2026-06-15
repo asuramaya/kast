@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_ID="kast"
-KAST_VERSION="0.4.0"
+KAST_VERSION="0.5.0"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
