@@ -1,21 +1,29 @@
 # shellcheck shell=bash
 
-# Name advertised to iPhone, iPad, and macOS clients.
-UXPLAY_NAME="Kast Receiver"
+# Name advertised to iPhone, iPad, and macOS clients. Leave it unset to get a
+# host-qualified default like "Kast Receiver (hostname)", so two kast boxes on
+# the same LAN don't show up as identical entries. Uncomment to pin a fixed name.
+#UXPLAY_NAME="Kast Receiver"
 
 # Extra arguments forwarded to uxplay.
-# Ships with -pin so a sender must enter a 4-digit PIN (shown on screen) before
-# it can mirror — the receiver listens on the whole LAN, so this gates access.
-# Remove -pin for frictionless (open) receiving; use "-pin 2468" for a fixed PIN.
+# Ships with -pin so a sender must enter a PIN before it can mirror — the
+# receiver listens on the whole LAN, so this gates access. With bare -pin, uxplay
+# shows a fresh random 4-digit PIN on the receiving screen for each connection;
+# use "-pin 2468" for a fixed code. Remove -pin entirely for open receiving.
 # Other examples: UXPLAY_ARGS=(-h265 -pin)
 UXPLAY_ARGS=(-pin)
 
 # Name advertised by the AirPlay AUDIO receiver (shairport-sync), separate from
-# the screen-mirroring receiver above.
-SHAIRPORT_NAME="Kast Audio"
+# the screen-mirroring receiver above. Host-qualified default like the screen
+# receiver; uncomment to pin a fixed name.
+#SHAIRPORT_NAME="Kast Audio"
 
 # Extra arguments forwarded to shairport-sync, e.g. SHAIRPORT_ARGS=(-v).
 SHAIRPORT_ARGS=()
+
+# Name advertised by the YouTube DIAL receiver. Host-qualified default;
+# uncomment to pin a fixed name.
+#YT_RECEIVER_NAME="Kast YouTube"
 
 # Make "Display Cast…" drop Wi-Fi by default (1) or keep it (0). Needed for
 # Miracast on single-radio adapters. Editable from Kast preferences.

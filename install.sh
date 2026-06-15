@@ -29,7 +29,9 @@ bootstrap_from_release() {
     tarball="${tmp}/kast.tar.gz"
     printf 'Fetching latest kast release...\n'
     if ! curl -fsSL "https://github.com/${REPO_SLUG}/releases/latest/download/kast.tar.gz" -o "${tarball}"; then
-        printf 'No release asset yet; using the main branch.\n'
+        printf '\n  WARNING: no published release asset found — falling back to the\n' >&2
+        printf '  UNREVIEWED tip of the main branch. Set KAST_NO_UNSTABLE=1 to refuse this.\n\n' >&2
+        [[ "${KAST_NO_UNSTABLE:-0}" == "1" ]] && { printf 'Refusing main-branch fallback (KAST_NO_UNSTABLE=1).\n' >&2; exit 1; }
         curl -fsSL "https://github.com/${REPO_SLUG}/archive/refs/heads/main.tar.gz" -o "${tarball}" \
             || { printf 'Download failed.\n' >&2; exit 1; }
     fi
@@ -103,7 +105,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 install_packages() {
-    mapfile -t packages < <(grep -Ev '^\s*(#|$)' "${ROOT_DIR}/packages.txt")
+    # Strip CRLF so a Windows-checkout packages.txt doesn't yield names with a
+    # trailing \r that apt then can't resolve.
+    mapfile -t packages < <(grep -Ev '^\s*(#|$)' "${ROOT_DIR}/packages.txt" | tr -d '\r')
     # Optional feature dependencies, added only when their flag is set, so a
     # plain install stays lean.
     [[ "${WITH_AIRPLAY_AUDIO}" -eq 1 ]] && packages+=(shairport-sync)
@@ -124,7 +128,11 @@ install_gnd_dbus_service() {
     [[ -n "${daemon_bin}" ]] || return 0
     svc="${DATA_HOME}/dbus-1/services/org.gnome.NetworkDisplays.Daemon.service"
     install -D -m 644 "${ROOT_DIR}/dbus/org.gnome.NetworkDisplays.Daemon.service" "${svc}"
-    sed -i "s|@DAEMON_BIN@|${daemon_bin}|" "${svc}"
+    # Escape sed replacement metacharacters (& | \) so an unusual install path
+    # can't corrupt the Exec= line the session bus will run.
+    local daemon_esc
+    daemon_esc="$(printf '%s' "${daemon_bin}" | sed -e 's/[\\&|]/\\&/g')"
+    sed -i "s|@DAEMON_BIN@|${daemon_esc}|" "${svc}"
 }
 
 install_user_files() {
@@ -144,8 +152,11 @@ install_user_files() {
     install_gnd_dbus_service
     install -D -m 644 "${ROOT_DIR}/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
     # The desktop session's PATH may not include ~/.local/bin, so point the
-    # launcher's Exec at the absolute kast path.
-    sed -i "s|^Exec=kast |Exec=${BIN_DIR}/kast |" "${DATA_HOME}/applications/kast-center.desktop"
+    # launcher's Exec at the absolute kast path (escape sed metacharacters in case
+    # $HOME contains & | or \).
+    local exec_esc
+    exec_esc="$(printf '%s' "${BIN_DIR}/kast " | sed -e 's/[\\&|]/\\&/g')"
+    sed -i "s|^Exec=kast |Exec=${exec_esc}|" "${DATA_HOME}/applications/kast-center.desktop"
     # GNOME Quick Settings extension — the primary UI.
     install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/extension.js" "${EXT_DIR}/extension.js"
     install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/prefs.js" "${EXT_DIR}/prefs.js"
@@ -213,22 +224,33 @@ install_youtube_receiver() {
     local dest="${DATA_HOME}/${APP_ID}/youtube-receiver"
     install -D -m 644 "${ROOT_DIR}/youtube-receiver/index.mjs" "${dest}/index.mjs"
     install -D -m 644 "${ROOT_DIR}/youtube-receiver/package.json" "${dest}/package.json"
+    # Ship the lockfile so deps install reproducibly via `npm ci` (pinned to the
+    # audited tree) rather than `npm install` (which can drift to newer versions).
+    install -D -m 644 "${ROOT_DIR}/youtube-receiver/package-lock.json" "${dest}/package-lock.json"
     if command -v npm >/dev/null 2>&1; then
-        ( cd "${dest}" && npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) \
-            || PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }YouTube receiver deps failed to install (run: cd ${dest} && npm install)."
+        ( cd "${dest}" && npm ci --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) \
+            || PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }YouTube receiver deps failed to install (run: cd ${dest} && npm ci)."
     else
         PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }npm not found; YouTube receiver needs Node.js (apt install nodejs npm) then re-run install."
     fi
     # Pre-seed kast's self-updating yt-dlp so the first cast doesn't wait on a
-    # download. Best-effort; the receiver fetches/refreshes it at runtime too.
-    if command -v curl >/dev/null 2>&1; then
-        local yt_dlp_bin="${DATA_HOME}/${APP_ID}/bin/yt-dlp"
+    # download. Best-effort; verify the SHA-256 before trusting the binary.
+    if command -v curl >/dev/null 2>&1 && command -v sha256sum >/dev/null 2>&1; then
+        local yt_dlp_bin="${DATA_HOME}/${APP_ID}/bin/yt-dlp" yt_tmp yt_want yt_got
         mkdir -p "$(dirname "${yt_dlp_bin}")"
-        if curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" -o "${yt_dlp_bin}.new"; then
-            chmod +x "${yt_dlp_bin}.new"
-            mv -f "${yt_dlp_bin}.new" "${yt_dlp_bin}"
+        yt_tmp="$(mktemp "${yt_dlp_bin}.XXXXXX")" || yt_tmp=""
+        if [[ -n "${yt_tmp}" ]] && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" -o "${yt_tmp}"; then
+            yt_want="$(curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS" 2>/dev/null | awk '$2 == "yt-dlp" { print $1; exit }')"
+            yt_got="$(sha256sum "${yt_tmp}" | awk '{ print $1 }')"
+            if [[ -n "${yt_want}" && "${yt_want}" == "${yt_got}" ]]; then
+                chmod +x "${yt_tmp}"
+                mv -f "${yt_tmp}" "${yt_dlp_bin}"
+            else
+                rm -f "${yt_tmp}"
+                PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }yt-dlp checksum mismatch; skipped pre-seed (kast will retry at runtime)."
+            fi
         else
-            rm -f "${yt_dlp_bin}.new"
+            rm -f "${yt_tmp}"
         fi
     fi
 }

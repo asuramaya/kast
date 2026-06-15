@@ -8,6 +8,10 @@ Type=simple
 ExecStart=%h/.local/bin/kast audio-receiver-run
 Restart=on-failure
 RestartSec=2
+# Cheap hardening for a LAN-facing listener. Keep the address families the
+# receiver needs: IP + unix sockets + netlink (interface enumeration / avahi).
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 [Install]
 WantedBy=default.target

@@ -19,7 +19,18 @@ const NAME = process.env.KAST_YT_NAME || 'Kast YouTube';
 const MPV = process.env.KAST_YT_MPV || 'mpv';
 const YTDLP = process.env.KAST_YT_DLP || '';
 const PORT = parseInt(process.env.KAST_YT_PORT || '8009', 10);
-const SOCK = path.join(os.tmpdir(), `kast-mpv-${process.pid}.sock`);
+// mpv's JSON-IPC socket must NOT live in shared /tmp: anyone who can open it
+// speaks full mpv IPC (load local files, screenshot to arbitrary paths, drive
+// playback, read state). Keep it in a private 0700 dir, preferring the per-uid
+// XDG_RUNTIME_DIR (already 0700) over a tmpdir fallback.
+const SOCK_DIR = path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), 'kast');
+const SOCK = path.join(SOCK_DIR, `mpv-${process.pid}.sock`);
+// YouTube ids are exactly 11 chars of [A-Za-z0-9_-]; the cast payload is
+// unauthenticated (DIAL), so validate before building any URL from a video id.
+const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+// Cap the IPC read buffer so a peer streaming bytes with no newline can't grow
+// it without bound (memory-exhaustion DoS). mpv replies are tiny.
+const MAX_IPC_BUF = 1 << 20;
 const STATE_DIR = process.env.KAST_YT_STATE
   || path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state'), 'kast');
 
@@ -41,7 +52,11 @@ class FileDataStore extends DataStore {
     await this._load();
     this._data[key] = value;
     await fs.mkdir(path.dirname(this._file), { recursive: true });
-    await fs.writeFile(this._file, JSON.stringify(this._data));
+    // Write+rename so a crash mid-write can't truncate the file (which would
+    // reset persisted screen/pairing state to {} on the next load).
+    const tmp = `${this._file}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(this._data));
+    await fs.rename(tmp, this._file);
   }
   async get(key) {
     await this._load();
@@ -63,6 +78,10 @@ class Mpv {
 
   async _ensure() {
     if (this._proc && !this._proc.killed) return;
+    // Private dir for the IPC socket (0700), and clear any stale socket left by
+    // a prior crash before mpv recreates it.
+    await fs.mkdir(SOCK_DIR, { recursive: true, mode: 0o700 });
+    try { await fs.rm(SOCK, { force: true }); } catch { /* ignore */ }
     const args = [
       '--idle=yes', '--force-window=yes', '--keep-open=no',
       '--no-terminal', `--input-ipc-server=${SOCK}`,
@@ -95,6 +114,11 @@ class Mpv {
 
   _onData(chunk) {
     this._buf += chunk.toString('utf8');
+    if (this._buf.length > MAX_IPC_BUF) {
+      // Runaway input with no newline — drop it rather than grow unbounded.
+      this._buf = '';
+      return;
+    }
     let nl;
     while ((nl = this._buf.indexOf('\n')) >= 0) {
       const line = this._buf.slice(0, nl);
@@ -127,9 +151,15 @@ class Mpv {
 
   async load(videoId, startSec) {
     await this._ensure();
+    if (!VIDEO_ID_RE.test(videoId))
+      throw new Error(`refusing to play invalid video id: ${JSON.stringify(videoId)}`);
     const url = `https://www.youtube.com/watch?v=${videoId}`;
-    const opts = startSec ? `start=+${Math.floor(startSec)}` : '';
-    await this.cmd('loadfile', url, 'replace', opts ? { 'start': `+${Math.floor(startSec)}` } : {});
+    // Apply the start offset via the per-file `start` property (set before the
+    // load takes effect) rather than a positional loadfile option — the latter
+    // changed arg position across mpv versions; the property is stable.
+    await this.cmd('set_property', 'start',
+      startSec && startSec > 0 ? `+${Math.floor(startSec)}` : 'none');
+    await this.cmd('loadfile', url, 'replace');
   }
 
   stop() { return this.cmd('stop'); }
@@ -168,17 +198,28 @@ class MpvPlayer extends Player {
   async doGetDuration() { return this._mpv.getDuration(); }
 }
 
-const receiver = new YouTubeCastReceiver(new MpvPlayer(), {
+const player = new MpvPlayer();
+const receiver = new YouTubeCastReceiver(player, {
   dial: { port: PORT },
   device: { name: NAME, brand: 'Kast', model: 'kast' },
+  // Autoplay-on-connect: any device that can reach the DIAL port (the whole LAN
+  // — DIAL has no pairing) can start playback unsolicited. By design for a cast
+  // receiver; the unit ships off by default and is meant for a trusted network.
   app: { enableAutoplayOnConnect: true },
   dataStore: new FileDataStore(path.join(STATE_DIR, 'youtube-receiver.json')),
 });
 
 receiver.on('error', (err) => console.error('kast-youtube:', err?.message || err));
 
-process.on('SIGTERM', async () => { try { await receiver.stop(); } catch {} process.exit(0); });
-process.on('SIGINT', async () => { try { await receiver.stop(); } catch {} process.exit(0); });
+// Node doesn't forward signals to the spawned mpv, so kill it explicitly —
+// otherwise every restart leaks an mpv process, window, and stale IPC socket.
+async function shutdown() {
+  try { await receiver.stop(); } catch { /* ignore */ }
+  try { player._mpv.quit(); } catch { /* ignore */ }
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 await receiver.start();
 console.log(`kast YouTube receiver "${NAME}" advertising on DIAL port ${PORT}`);

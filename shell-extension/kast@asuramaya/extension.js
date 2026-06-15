@@ -17,21 +17,26 @@ function runKast(args) {
     }
 }
 
+// Always invokes onDone exactly once — with the parsed JSON, or null on any
+// failure — so callers can clear in-flight flags without leaking them on error.
 function readKastJson(args, onDone) {
     try {
         const proc = Gio.Subprocess.new(
             [CLI_PATH, ...args],
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
         proc.communicate_utf8_async(null, null, (p, res) => {
+            let parsed = null;
             try {
                 const [, stdout] = p.communicate_utf8_finish(res);
-                onDone(JSON.parse(stdout));
+                parsed = JSON.parse(stdout);
             } catch (error) {
                 logError(error, 'kast: JSON parse failed');
             }
+            onDone(parsed);
         });
     } catch (error) {
         logError(error, 'kast: subprocess failed');
+        onDone(null);
     }
 }
 
@@ -161,6 +166,10 @@ class KastToggle extends QuickMenuToggle {
             addSwitch('AirPlay — audio', status.audio_receiver?.active, 'audio-receiver-start', 'audio-receiver-stop');
         if (status.youtube_receiver?.installed)
             addSwitch('YouTube', status.youtube_receiver?.active, 'youtube-receiver-start', 'youtube-receiver-stop');
+        else if (status.youtube_receiver?.reason)
+            // Surface YouTube even when it can't run yet, with what it needs —
+            // otherwise the feature just silently vanishes from the menu.
+            m.addMenuItem(dim(`YouTube — ${status.youtube_receiver.reason}`));
 
         const anyOn = status.receiver?.active || status.audio_receiver?.active || status.youtube_receiver?.active;
         this._receiverMenu.label.text = anyOn ? 'Receive · on' : 'Receive';
@@ -181,6 +190,8 @@ class KastIndicator extends SystemIndicator {
         super._init();
 
         this._data = {status: null, castTargets: [], miracastTargets: [], miracastScanning: false, airplayTargets: [], updateInfo: null};
+        this._castScanning = false;
+        this._airplayScanning = false;
 
         this._toggle = new KastToggle(onPrefs);
         this._toggle.onRescanCast = () => { this._discoverCastTargets(); this._discoverAirplayTargets(); };
@@ -206,13 +217,23 @@ class KastIndicator extends SystemIndicator {
 
     _refresh() {
         readKastJson(['status', '--json'], status => {
-            this._data.status = status;
-            this._render();
+            // Guard the shape: a non-object (null / error) would throw in render.
+            if (status && typeof status === 'object' && !Array.isArray(status)) {
+                this._data.status = status;
+                this._render();
+            }
         });
     }
 
     _discoverCastTargets() {
+        // In-flight guard: this runs on a timer and on demand (Rescan); without
+        // it, overlapping `kast` subprocesses spawn and a slow older call can
+        // overwrite newer results.
+        if (this._castScanning)
+            return GLib.SOURCE_CONTINUE;
+        this._castScanning = true;
         readKastJson(['cast-targets', '--json'], targets => {
+            this._castScanning = false;
             if (Array.isArray(targets)) {
                 this._data.castTargets = targets;
                 this._render();
@@ -222,7 +243,11 @@ class KastIndicator extends SystemIndicator {
     }
 
     _discoverAirplayTargets() {
+        if (this._airplayScanning)
+            return GLib.SOURCE_CONTINUE;
+        this._airplayScanning = true;
         readKastJson(['airplay-targets', '--json'], targets => {
+            this._airplayScanning = false;
             if (Array.isArray(targets)) {
                 this._data.airplayTargets = targets;
                 this._render();
