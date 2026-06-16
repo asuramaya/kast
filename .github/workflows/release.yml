@@ -31,11 +31,19 @@ jobs:
           echo "--- contents ---"
           tar -tzf kast.tar.gz
 
-      - name: Create GitHub release
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            kast.tar.gz kast.tar.gz.sha256 \
-            --title "kast ${GITHUB_REF_NAME}" \
-            --generate-notes
+          # Idempotent: if the release was already created by hand (e.g. with
+          # release notes written ahead of the tag push), attach/replace the
+          # build assets on it instead of failing on "tag already exists".
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" \
+              kast.tar.gz kast.tar.gz.sha256 --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              kast.tar.gz kast.tar.gz.sha256 \
+              --title "kast ${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
