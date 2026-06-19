@@ -100,8 +100,9 @@ kast update --apt    # also refresh system (apt) packages for your installed fea
 `kast update` re-runs the installer for the latest release, preserving the optional features
 you already have (it detects shairport-sync / the YouTube receiver and keeps them). By default
 it doesn't touch apt (so it needs no `sudo` and works from the tile's one-click "⬆ Update"
-entry); use `--apt` from a terminal to also refresh system packages. Each release publishes a
-`.sha256` next to the tarball for manual verification.
+entry); use `--apt` from a terminal to also refresh system packages. The `curl | bash`
+bootstrap verifies the downloaded release tarball against its published `.sha256` before
+extracting (and aborts on mismatch); the `.sha256` is also there for manual verification.
 
 ## Uninstall
 
@@ -148,13 +149,14 @@ casting" behaviour. It writes `~/.config/kast/uxplay.conf` — the same file the
 
 ```
 kast pick [--miracast]                 graphical "cast to…" menu (Super+K / launcher)
-kast targets [--json]                  every discovered target (Chromecast + AirPlay)
+kast targets [--json] [--scan]         every discovered target (Chromecast + AirPlay)
+                                       --scan issues fresh mDNS queries (vs the avahi cache)
 kast connect <name|addr> [media]       connect: mirror, or cast a file/URL if given
 kast cast-file <target> <url|file>     play a file/URL (AirPlay via pyatv, Chromecast via catt)
 kast disconnect                        stop the active display stream
 kast control [<target> [<action>]]     control center (caps / now-playing / actions)
 kast control-center [target]           the graphical remote window
-kast airplay-targets / cast-targets / miracast-targets [--json]
+kast airplay-targets / cast-targets / miracast-targets [--json] [--scan]
 kast receiver-start|stop|toggle              AirPlay screen receiver (uxplay)
 kast audio-receiver-start|stop|toggle        AirPlay audio receiver (shairport-sync)
 kast youtube-receiver-start|stop|toggle      YouTube DIAL receiver
@@ -216,8 +218,11 @@ routing, and desktop integration, and prints a fix hint for each problem.
   as text (avahi escapes are decoded but control bytes are refused).
 - `~/.config/kast/uxplay.conf` is sourced by the CLI (like a shell rc file); the preferences
   dialog escapes everything it writes there.
-- `install.sh` and `kast update` fetch over HTTPS from GitHub; each release publishes a `.sha256`
-  for manual verification. The pipx helpers are isolated per-tool.
+- `install.sh` and `kast update` fetch over HTTPS from GitHub; the `curl | bash` bootstrap
+  verifies the release tarball against its published `.sha256` before extracting and aborts on a
+  mismatch (the unreviewed main-branch fallback is inherently unverifiable and warns loudly —
+  refuse it with `KAST_NO_UNSTABLE=1`). yt-dlp downloads are SHA-256 verified too. The pipx
+  helpers are isolated per-tool.
 
 Found a vulnerability? Please report it privately via the repository's **Security** tab —
 details in [SECURITY.md](SECURITY.md).
@@ -236,8 +241,11 @@ Known limitations:
   Ubuntu 26.04 has it). On older versions Kast falls back to the GUI picker. Kast installs a D-Bus
   activation file so the session bus starts the daemon on demand, with a runtime fallback that
   spawns it directly if activation isn't available.
-- AirPlay/Chromecast video-out streams a **file or URL**, not live screen mirroring.
-- Discovery is passive mDNS (timer-refreshed) for Chromecast/AirPlay; Miracast is an on-demand
+- Live **screen** mirroring out goes to Chromecast/Miracast via `gnome-network-displays`
+  (the tile's "mirror screen"); the `pyatv`/`catt` **file-or-URL** cast is a separate path, and
+  AirPlay screen mirroring out is not possible (FairPlay/MFi — see below).
+- Discovery is passive mDNS (timer-refreshed) for Chromecast/AirPlay — fast, off the avahi cache;
+  the tile's **Rescan** (or `--scan`) issues fresh queries on demand. Miracast is an on-demand
   Wi-Fi P2P find (shares the radio), so it's never auto-polled.
 - The YouTube receiver depends on `yt-dlp`; Kast keeps a self-updating user-local copy (refreshed
   daily) and points mpv at it, so YouTube changes heal without an apt upgrade. Needs `curl` to

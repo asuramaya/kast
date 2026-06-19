@@ -17,24 +17,55 @@ WITH_YOUTUBE=0
 WITH_AIRPLAY_AUDIO=0
 PACKAGE_STATUS_NOTE=""
 
+verify_release_tarball() {
+    # Verify the downloaded release tarball against its published SHA-256 asset
+    # (kast.tar.gz.sha256, content "<hash>  kast.tar.gz") before we extract and
+    # execute it. We refuse rather than fall back to "unverified" here: the
+    # release path is supposed to be verifiable, so a missing checksum or a
+    # mismatch means something is wrong, not that we should trust it anyway.
+    # (The main-branch fallback has no such asset and is gated by its own loud
+    # warning + KAST_NO_UNSTABLE instead.)
+    local tarball="$1" want got
+    command -v sha256sum >/dev/null 2>&1 || {
+        printf 'sha256sum not found; cannot verify the release download. Install coreutils and retry.\n' >&2
+        exit 1
+    }
+    want="$(curl -fsSL "https://github.com/${REPO_SLUG}/releases/latest/download/kast.tar.gz.sha256" 2>/dev/null \
+        | awk '$2 == "kast.tar.gz" { print $1; exit }')"
+    if [[ -z "${want}" ]]; then
+        printf 'Could not fetch the release checksum (kast.tar.gz.sha256); refusing to install an unverified download.\n' >&2
+        exit 1
+    fi
+    got="$(sha256sum "${tarball}" | awk '{ print $1 }')"
+    if [[ "${want}" != "${got}" ]]; then
+        printf 'Checksum mismatch on kast.tar.gz (expected %s, got %s); aborting.\n' "${want}" "${got}" >&2
+        exit 1
+    fi
+    printf 'Verified release checksum.\n'
+}
+
 bootstrap_from_release() {
     # Reached when install.sh runs without its sibling files next to it, i.e.
     # piped from curl. Fetch the published tarball (falling back to main) and
     # re-exec the real installer from the extracted tree.
     command -v curl >/dev/null 2>&1 || { printf 'curl is required for remote install\n' >&2; exit 1; }
     command -v tar  >/dev/null 2>&1 || { printf 'tar is required for remote install\n' >&2; exit 1; }
-    local tmp tarball inner
+    local tmp tarball inner from_release=1
     tmp="$(mktemp -d)"
     trap 'rm -rf "${tmp}"' EXIT
     tarball="${tmp}/kast.tar.gz"
     printf 'Fetching latest kast release...\n'
     if ! curl -fsSL "https://github.com/${REPO_SLUG}/releases/latest/download/kast.tar.gz" -o "${tarball}"; then
+        from_release=0
         printf '\n  WARNING: no published release asset found — falling back to the\n' >&2
         printf '  UNREVIEWED tip of the main branch. Set KAST_NO_UNSTABLE=1 to refuse this.\n\n' >&2
         [[ "${KAST_NO_UNSTABLE:-0}" == "1" ]] && { printf 'Refusing main-branch fallback (KAST_NO_UNSTABLE=1).\n' >&2; exit 1; }
         curl -fsSL "https://github.com/${REPO_SLUG}/archive/refs/heads/main.tar.gz" -o "${tarball}" \
             || { printf 'Download failed.\n' >&2; exit 1; }
     fi
+    # Released tarballs are verified against their published checksum; the
+    # main-branch fallback is inherently unverifiable (already warned above).
+    [[ "${from_release}" -eq 1 ]] && verify_release_tarball "${tarball}"
     tar -xzf "${tarball}" -C "${tmp}"
     inner="$(find "${tmp}" -maxdepth 2 -name install.sh -type f | head -n1)"
     [[ -n "${inner}" ]] || { printf 'install.sh not found in archive\n' >&2; exit 1; }
