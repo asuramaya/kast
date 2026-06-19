@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_ID="kast"
-KAST_VERSION="0.6.0"
+KAST_VERSION="0.7.0"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
@@ -956,13 +956,38 @@ display_connect() {
     fi
 }
 
+scan_targets_progress() {
+    # Active mDNS scan for the picker, behind a pulsating zenity progress dialog
+    # so the few-second wait is visibly acknowledged rather than a frozen window.
+    # Prints the targets JSON on stdout. Unlike the tile (which keeps avahi warm
+    # in the background), the picker may be launched cold from the app grid, so it
+    # scans actively every time.
+    local out pid
+    out="$(mktemp)"
+    ( targets_json active 2>/dev/null >"${out}" ) &
+    pid=$!
+    # Feed the dialog until the scan process exits; --auto-close dismisses it when
+    # the loop ends and stdin hits EOF.
+    {
+        while kill -0 "${pid}" 2>/dev/null; do
+            printf '#Looking for cast targets…\n'
+            sleep 0.25
+        done
+    } | zenity --progress --pulsate --auto-close --no-cancel \
+            --title="Kast" --text="Looking for cast targets…" --width=320 \
+            >/dev/null 2>&1 || true
+    wait "${pid}" 2>/dev/null || true
+    cat "${out}"
+    rm -f "${out}"
+}
+
 cast_pick() {
     # kast's own cast menu — a graphical picker that works regardless of the
     # GNOME shell version (the Quick Settings tile can't be popped from a
     # launcher, and a shell upgrade can disable the extension entirely). Lists
-    # the fast passive targets (Chromecast + AirPlay) plus, with --miracast, the
-    # results of an on-demand Wi-Fi P2P scan; an active-stream Disconnect; and a
-    # hand-off to the full GUI picker.
+    # Chromecast + AirPlay targets from a fresh active scan (with a progress
+    # dialog) plus, with --miracast, the results of an on-demand Wi-Fi P2P scan;
+    # an active-stream Disconnect; and a hand-off to the full GUI picker.
     need jq
     command -v zenity >/dev/null 2>&1 || die "zenity is required for the picker (apt install zenity)"
     local include_miracast=0
@@ -970,14 +995,15 @@ cast_pick() {
 
     # Parallel arrays: zenity prints a hidden index; we look up the action so a
     # device name (attacker-controlled mDNS) never has to round-trip as a key.
-    local rows=() actions=() i=0 proto name addr typ
+    local rows=() actions=() i=0 proto name addr typ scan_out
+    scan_out="$(scan_targets_progress)"
     while IFS=$'\t' read -r proto name addr; do
         [[ -n "${proto}" ]] || continue
         case "${proto}" in
             chromecast) typ="Chromecast";    rows+=("${typ}" "${name}" "${i}"); actions+=("display-connect"$'\t'"${name}"); i=$((i + 1)) ;;
             airplay)    typ="AirPlay video"; rows+=("${typ}" "${name} — cast file…" "${i}"); actions+=("airplay-pick"$'\t'"${addr:-${name}}"); i=$((i + 1)) ;;
         esac
-    done < <(targets_json | jq -r '.[] | [.protocol, .name, (.address // "")] | @tsv')
+    done < <(printf '%s' "${scan_out}" | jq -r '.[] | [.protocol, .name, (.address // "")] | @tsv')
 
     # Miracast shares the Wi-Fi radio, so it is an explicit on-demand scan rather
     # than part of the passive list.

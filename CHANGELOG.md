@@ -3,6 +3,21 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-19
+
+### Added
+- **Discovery now stays warm on its own.** The Quick Settings tile issues fresh mDNS queries
+  periodically in the background (and immediately when you expand "Cast to…"), so the target list
+  is up to date the moment you look at it — no manual Rescan needed. Cheap cached reads still drive
+  the in-between renders, so opening the menu stays instant.
+- **The `kast pick` / Super+K picker actively scans.** Because the picker can be launched cold from
+  the app grid (with no tile keeping avahi warm), it now runs a fresh scan behind a brief
+  "Looking for cast targets…" progress dialog instead of reading a possibly-empty cache.
+
+### Backfilled
+- The **v0.4.0** GitHub release's missing `kast.tar.gz` / `.sha256` assets were uploaded after the
+  fact (cosmetic — v0.4.0 isn't "latest", so nothing installed from it).
+
 ## [0.6.0] - 2026-06-19
 
 ### Security

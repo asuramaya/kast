@@ -244,9 +244,10 @@ Known limitations:
 - Live **screen** mirroring out goes to Chromecast/Miracast via `gnome-network-displays`
   (the tile's "mirror screen"); the `pyatv`/`catt` **file-or-URL** cast is a separate path, and
   AirPlay screen mirroring out is not possible (FairPlay/MFi — see below).
-- Discovery is passive mDNS (timer-refreshed) for Chromecast/AirPlay — fast, off the avahi cache;
-  the tile's **Rescan** (or `--scan`) issues fresh queries on demand. Miracast is an on-demand
-  Wi-Fi P2P find (shares the radio), so it's never auto-polled.
+- Discovery is mDNS for Chromecast/AirPlay: cheap cached reads keep the UI responsive, and the tile
+  refreshes with fresh queries periodically in the background and when you open "Cast to…" (the
+  `kast pick` picker always scans actively, behind a progress dialog). `--scan` forces fresh queries
+  from the CLI. Miracast is an on-demand Wi-Fi P2P find (shares the radio), so it's never auto-polled.
 - The YouTube receiver depends on `yt-dlp`; Kast keeps a self-updating user-local copy (refreshed
   daily) and points mpv at it, so YouTube changes heal without an apt upgrade. Needs `curl` to
   fetch it; a system `yt-dlp` is used as a fallback.
