@@ -78,7 +78,13 @@ if [[ ! -f "${ROOT_DIR}/scripts/kast" ]]; then
     bootstrap_from_release "$@"
 fi
 
-KAST_VERSION="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' "${ROOT_DIR}/scripts/kast" 2>/dev/null)"
+# The repo-root VERSION file is the source of truth; fall back to the value
+# embedded in scripts/kast for tarballs that predate the VERSION file.
+if [[ -f "${ROOT_DIR}/VERSION" ]]; then
+    KAST_VERSION="$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION")"
+else
+    KAST_VERSION="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' "${ROOT_DIR}/scripts/kast" 2>/dev/null)"
+fi
 KAST_VERSION="${KAST_VERSION:-unknown}"
 
 EXT_UUID="kast@asuramaya"

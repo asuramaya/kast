@@ -92,9 +92,10 @@ After installing, run `kast doctor` to confirm the stack is healthy.
 ## Updating
 
 ```bash
-kast check-update    # is a newer release available?
-kast update          # update in place from the latest GitHub release
-kast update --apt    # also refresh system (apt) packages for your installed features
+kast check-update      # is a newer release available?
+kast update --check    # same check, as a flag on update (does not install)
+kast update            # update in place from the latest GitHub release
+kast update --apt      # also refresh system (apt) packages for your installed features
 ```
 
 `kast update` re-runs the installer for the latest release, preserving the optional features

@@ -14,6 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: VERSION matches KAST_VERSION
+        run: |
+          file="$(tr -d '[:space:]' < VERSION)"
+          script="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' scripts/kast)"
+          echo "VERSION=${file} script=${script}"
+          if [ "${file}" != "${script}" ]; then
+            echo "::error::VERSION ${file} does not match KAST_VERSION ${script} in scripts/kast"
+            exit 1
+          fi
+
       - name: ShellCheck
         run: shellcheck install.sh uninstall.sh scripts/kast tests/smoke.sh
 

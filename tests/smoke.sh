@@ -56,8 +56,10 @@ printf 'kast smoke tests\n'
 
 # --- basic surface ---
 expect_ok    "version"                       "${KAST[@]}" version
+expect_grep  "version matches VERSION file"  "$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION")" "${KAST[@]}" version
 expect_grep  "--help lists airplay-cast"      "airplay-cast" "${KAST[@]}" --help
 expect_grep  "--help documents --scan"        "--scan" "${KAST[@]}" --help
+expect_grep  "--help documents update --check" "update \[--check" "${KAST[@]}" --help
 expect_fail  "unknown subcommand errors"      "${KAST[@]}" definitely-not-a-command
 
 # --- discovery emits valid JSON (empty without an avahi daemon, still an array) ---

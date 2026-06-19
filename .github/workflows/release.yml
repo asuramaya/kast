@@ -13,13 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify tag matches KAST_VERSION
+      - name: Verify tag matches VERSION and KAST_VERSION
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          ver="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' scripts/kast)"
-          echo "tag=${tag} script=${ver}"
-          if [ "${tag}" != "${ver}" ]; then
-            echo "::error::tag ${tag} does not match KAST_VERSION ${ver} in scripts/kast"
+          file="$(tr -d '[:space:]' < VERSION)"
+          script="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' scripts/kast)"
+          echo "tag=${tag} VERSION=${file} script=${script}"
+          if [ "${tag}" != "${file}" ]; then
+            echo "::error::tag ${tag} does not match VERSION ${file}"
+            exit 1
+          fi
+          if [ "${file}" != "${script}" ]; then
+            echo "::error::VERSION ${file} does not match KAST_VERSION ${script} in scripts/kast"
             exit 1
           fi
 
