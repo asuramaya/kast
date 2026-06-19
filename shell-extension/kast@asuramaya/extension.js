@@ -83,9 +83,16 @@ class KastToggle extends QuickMenuToggle {
         this._statusSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._statusSection);
 
-        // Cast to… — collapsible list of discovered targets.
+        // Cast to… — collapsible list of discovered targets. Expanding it is the
+        // moment the user is about to pick a target, so refresh with fresh mDNS
+        // queries right then (silently — the explicit Rescan button is what shows
+        // the "Scanning…" label).
         this._castMenu = new PopupMenu.PopupSubMenuMenuItem('Cast to…', true);
         this._castMenu.icon.icon_name = 'video-display-symbolic';
+        this._castMenu.menu.connect('open-state-changed', (_menu, open) => {
+            if (open)
+                this.onCastMenuOpen?.();
+        });
         this.menu.addMenuItem(this._castMenu);
 
         // Receive — collapsible on/off switches for the inbound receivers.
@@ -215,6 +222,7 @@ class KastIndicator extends SystemIndicator {
         this._toggle = new KastToggle(onPrefs);
         this._toggle.onRescanCast = () => this._rescanCast();
         this._toggle.onScanMiracast = () => this._scanMiracast();
+        this._toggle.onCastMenuOpen = () => this._discoverAll(true);
         this.quickSettingsItems.push(this._toggle);
 
         this._refresh();
@@ -222,12 +230,24 @@ class KastIndicator extends SystemIndicator {
             this._refresh();
             return GLib.SOURCE_CONTINUE;
         });
-        this._discoverCastTargets();
-        this._castTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 20, () => this._discoverCastTargets());
-        this._discoverAirplayTargets();
-        this._airplayTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 20, () => this._discoverAirplayTargets());
+        // Background discovery: a cheap cached read every 20s keeps renders
+        // responsive; every 3rd tick (~60s) issues fresh mDNS queries to keep
+        // avahi's cache warm, so the list stays accurate even before the user
+        // opens the menu. Opening the cast menu also triggers an active refresh.
+        this._discoverTick = 0;
+        this._discoverAll();
+        this._discoverTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 20, () => {
+            this._discoverTick += 1;
+            this._discoverAll(this._discoverTick % 3 === 0);
+            return GLib.SOURCE_CONTINUE;
+        });
         this._checkUpdate();
         this._updateTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 6 * 3600, () => this._checkUpdate());
+    }
+
+    _discoverAll(active = false) {
+        this._discoverCastTargets(active);
+        this._discoverAirplayTargets(active);
     }
 
     _render() {
@@ -264,12 +284,13 @@ class KastIndicator extends SystemIndicator {
     }
 
     _discoverCastTargets(active = false, onDone) {
-        // In-flight guard: this runs on a timer and on demand (Rescan); without
-        // it, overlapping `kast` subprocesses spawn and a slow older call can
-        // overwrite newer results. `active` issues fresh mDNS queries (slower).
+        // In-flight guard: this runs on the discovery timer and on demand (Rescan
+        // / menu open); without it, overlapping `kast` subprocesses spawn and a
+        // slow older call can overwrite newer results. `active` issues fresh mDNS
+        // queries (slower) instead of reading avahi's cache.
         if (this._castScanning) {
             onDone?.();
-            return GLib.SOURCE_CONTINUE;
+            return;
         }
         this._castScanning = true;
         const args = active ? ['cast-targets', '--json', '--scan'] : ['cast-targets', '--json'];
@@ -281,13 +302,12 @@ class KastIndicator extends SystemIndicator {
             }
             onDone?.();
         });
-        return GLib.SOURCE_CONTINUE;
     }
 
     _discoverAirplayTargets(active = false, onDone) {
         if (this._airplayScanning) {
             onDone?.();
-            return GLib.SOURCE_CONTINUE;
+            return;
         }
         this._airplayScanning = true;
         const args = active ? ['airplay-targets', '--json', '--scan'] : ['airplay-targets', '--json'];
@@ -299,7 +319,6 @@ class KastIndicator extends SystemIndicator {
             }
             onDone?.();
         });
-        return GLib.SOURCE_CONTINUE;
     }
 
     _scanMiracast() {
@@ -326,11 +345,11 @@ class KastIndicator extends SystemIndicator {
     }
 
     destroy() {
-        for (const id of [this._statusTimer, this._castTimer, this._airplayTimer, this._updateTimer]) {
+        for (const id of [this._statusTimer, this._discoverTimer, this._updateTimer]) {
             if (id)
                 GLib.source_remove(id);
         }
-        this._statusTimer = this._castTimer = this._airplayTimer = this._updateTimer = 0;
+        this._statusTimer = this._discoverTimer = this._updateTimer = 0;
         this.quickSettingsItems.forEach(item => item.destroy());
         super.destroy();
     }
