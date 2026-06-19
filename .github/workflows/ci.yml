@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: ShellCheck
-        run: shellcheck install.sh uninstall.sh scripts/kast
+        run: shellcheck install.sh uninstall.sh scripts/kast tests/smoke.sh
 
       - name: Python helpers (syntax)
         run: python3 -m py_compile scripts/kast-airplay scripts/kast-control-center
@@ -29,7 +29,4 @@ jobs:
         run: python3 -c "import json; json.load(open('shell-extension/kast@asuramaya/metadata.json'))"
 
       - name: CLI smoke
-        run: |
-          bash scripts/kast version
-          bash scripts/kast --help
-          bash scripts/kast --help | grep -q airplay-cast
+        run: bash tests/smoke.sh

@@ -3,6 +3,35 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-19
+
+### Security
+- **The installer now verifies the release tarball it downloads.** The `curl | bash` bootstrap
+  fetches the published `kast.tar.gz.sha256` and checks it against the downloaded `kast.tar.gz`
+  before extracting and executing, aborting on a mismatch (or if the checksum can't be fetched).
+  Previously the `.sha256` was published but never used by the installer. The unreviewed
+  main-branch fallback is inherently unverifiable and stays gated by its loud warning +
+  `KAST_NO_UNSTABLE=1`.
+
+### Added
+- **On-demand active discovery.** `kast targets`, `cast-targets`, and `airplay-targets` accept
+  `--scan` to issue fresh mDNS queries instead of reading avahi's cache, catching sinks that were
+  just powered on or aren't cached yet. The Quick Settings tile's **Rescan** now does an active
+  scan (with a "Scanning…" affordance) rather than just re-reading the cache; the timer-driven
+  refresh stays on the fast cached read.
+- **CLI smoke-test harness** (`tests/smoke.sh`), run in CI: exercises the no-hardware paths
+  (help/version, discovery JSON shape, state round-trips) against a throwaway XDG home.
+
+### Changed
+- **The tile now surfaces command failures.** A failed cast/connect from the Quick Settings menu
+  raises a notification with kast's own error message instead of failing silently (there's no
+  terminal behind the tile). Benign user-cancels — e.g. closing the picker — exit cleanly and stay
+  quiet.
+- **Docs reconciled with behavior.** The README's security and roadmap sections now match reality:
+  installer checksum verification is documented, and live screen mirroring out is correctly
+  described as working for Chromecast/Miracast via `gnome-network-displays` (only AirPlay
+  screen-mirror-out remains out of scope, FairPlay/MFi).
+
 ## [0.5.0] - 2026-06-15
 
 ### Security

@@ -10,10 +10,29 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 const CLI_PATH = `${GLib.get_home_dir()}/.local/bin/kast`;
 
 function runKast(args) {
+    // Fire the command but still watch its exit: from the tile there is no
+    // terminal, so a failed cast/connect would otherwise vanish silently. On a
+    // non-zero exit we surface kast's own last stderr line as a notification.
+    // User-cancel paths (e.g. closing the zenity picker) exit 0, so they stay
+    // quiet.
     try {
-        Gio.Subprocess.new([CLI_PATH, ...args], Gio.SubprocessFlags.NONE);
+        const proc = Gio.Subprocess.new(
+            [CLI_PATH, ...args],
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+        proc.communicate_utf8_async(null, null, (p, res) => {
+            try {
+                const [, , stderr] = p.communicate_utf8_finish(res);
+                if (!p.get_successful()) {
+                    const msg = (stderr || '').trim().split('\n').filter(Boolean).pop();
+                    Main.notify('Kast', msg || `kast ${args[0] ?? ''} failed`.trim());
+                }
+            } catch (error) {
+                logError(error, 'kast: command failed');
+            }
+        });
     } catch (error) {
         logError(error, 'kast: command failed');
+        Main.notify('Kast', `Failed to run kast ${args[0] ?? ''}`.trim());
     }
 }
 
@@ -115,7 +134,7 @@ class KastToggle extends QuickMenuToggle {
     }
 
     _renderCast(data) {
-        const {castTargets = [], airplayTargets = [], miracastTargets = [], miracastScanning = false} = data;
+        const {castTargets = [], airplayTargets = [], miracastTargets = [], miracastScanning = false, castScanning = false} = data;
         const canFile = !!data.status?.outbound?.chromecast_filecast;
         const m = this._castMenu.menu;
         m.removeAll();
@@ -150,7 +169,7 @@ class KastToggle extends QuickMenuToggle {
         m.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         m.addAction('Open picker…', () => runKast(['pick']));
         m.addAction(miracastScanning ? 'Scanning for Miracast…' : 'Scan for Miracast', () => this.onScanMiracast?.());
-        m.addAction('Rescan', () => this.onRescanCast?.());
+        m.addAction(castScanning ? 'Scanning…' : 'Rescan', () => this.onRescanCast?.());
     }
 
     _renderReceivers(status) {
@@ -189,12 +208,12 @@ class KastIndicator extends SystemIndicator {
     _init(onPrefs) {
         super._init();
 
-        this._data = {status: null, castTargets: [], miracastTargets: [], miracastScanning: false, airplayTargets: [], updateInfo: null};
+        this._data = {status: null, castTargets: [], miracastTargets: [], miracastScanning: false, airplayTargets: [], castScanning: false, updateInfo: null};
         this._castScanning = false;
         this._airplayScanning = false;
 
         this._toggle = new KastToggle(onPrefs);
-        this._toggle.onRescanCast = () => { this._discoverCastTargets(); this._discoverAirplayTargets(); };
+        this._toggle.onRescanCast = () => this._rescanCast();
         this._toggle.onScanMiracast = () => this._scanMiracast();
         this.quickSettingsItems.push(this._toggle);
 
@@ -225,33 +244,60 @@ class KastIndicator extends SystemIndicator {
         });
     }
 
-    _discoverCastTargets() {
+    _rescanCast() {
+        // Explicit Rescan: issue fresh mDNS queries (--scan) for both protocols
+        // and show a "Scanning…" affordance until both return, so the user gets
+        // feedback that something more than a cache re-read is happening.
+        if (this._data.castScanning)
+            return;
+        this._data.castScanning = true;
+        this._render();
+        let pending = 2;
+        const done = () => {
+            if (--pending === 0) {
+                this._data.castScanning = false;
+                this._render();
+            }
+        };
+        this._discoverCastTargets(true, done);
+        this._discoverAirplayTargets(true, done);
+    }
+
+    _discoverCastTargets(active = false, onDone) {
         // In-flight guard: this runs on a timer and on demand (Rescan); without
         // it, overlapping `kast` subprocesses spawn and a slow older call can
-        // overwrite newer results.
-        if (this._castScanning)
+        // overwrite newer results. `active` issues fresh mDNS queries (slower).
+        if (this._castScanning) {
+            onDone?.();
             return GLib.SOURCE_CONTINUE;
+        }
         this._castScanning = true;
-        readKastJson(['cast-targets', '--json'], targets => {
+        const args = active ? ['cast-targets', '--json', '--scan'] : ['cast-targets', '--json'];
+        readKastJson(args, targets => {
             this._castScanning = false;
             if (Array.isArray(targets)) {
                 this._data.castTargets = targets;
                 this._render();
             }
+            onDone?.();
         });
         return GLib.SOURCE_CONTINUE;
     }
 
-    _discoverAirplayTargets() {
-        if (this._airplayScanning)
+    _discoverAirplayTargets(active = false, onDone) {
+        if (this._airplayScanning) {
+            onDone?.();
             return GLib.SOURCE_CONTINUE;
+        }
         this._airplayScanning = true;
-        readKastJson(['airplay-targets', '--json'], targets => {
+        const args = active ? ['airplay-targets', '--json', '--scan'] : ['airplay-targets', '--json'];
+        readKastJson(args, targets => {
             this._airplayScanning = false;
             if (Array.isArray(targets)) {
                 this._data.airplayTargets = targets;
                 this._render();
             }
+            onDone?.();
         });
         return GLib.SOURCE_CONTINUE;
     }

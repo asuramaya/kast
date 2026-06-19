@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_ID="kast"
-KAST_VERSION="0.5.0"
+KAST_VERSION="0.6.0"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
@@ -422,19 +422,38 @@ local_addresses_json() {
         | jq -R -s 'split("\n") | map(select(length > 0)) | unique'
 }
 
+avahi_browse() {
+    # Read avahi's resolved records for a service type, in parseable form.
+    #
+    # Default (cached): -t terminates immediately, returning whatever the
+    # avahi-daemon already knows — fast, so the tile's timer-driven refresh and
+    # the CLI stay responsive. The daemon populates this cache in the background.
+    #
+    # "active": drop -t and browse for a few seconds, so avahi issues fresh mDNS
+    # queries and picks up sinks not yet in the cache (cold start, just-powered-on
+    # device). `timeout` bounds it; the `|| true` keeps timeout's non-zero exit
+    # when it kills the browse from tripping `set -o pipefail` upstream.
+    local service="$1" mode="${2:-}"
+    if [[ "${mode}" == "active" ]]; then
+        { timeout 4 avahi-browse -rp "${service}" 2>/dev/null || true; }
+    else
+        avahi-browse -rpt "${service}" 2>/dev/null
+    fi
+}
+
 cast_targets_json() {
     need jq
     # Chromecast / Google Cast devices advertise over mDNS as _googlecast._tcp.
-    # avahi-daemon keeps a live cache, so -t returns whatever is already known
-    # without a long blocking scan. We dedup across interfaces by address and
+    # A cached read returns avahi's known sinks instantly; pass "active" to issue
+    # fresh queries (see avahi_browse). We dedup across interfaces by address and
     # prefer the human "fn" TXT record over the (escaped) service name.
     if ! command -v avahi-browse >/dev/null 2>&1; then
         printf '[]\n'
         return 0
     fi
-    local locals
+    local locals mode="${1:-}"
     locals="$(local_addresses_json)"
-    avahi-browse -rpt _googlecast._tcp 2>/dev/null \
+    avahi_browse _googlecast._tcp "${mode}" \
         | LC_ALL=C awk -F';' '
             function unesc(s,    out, i, c, code) {
                 # avahi -p escapes bytes as decimal \DDD. Decode printable/UTF-8
@@ -482,7 +501,7 @@ cast_targets_json() {
 }
 
 cast_targets_text() {
-    cast_targets_json | jq -r '
+    cast_targets_json "${1:-}" | jq -r '
         if length == 0 then
             "No cast targets discovered"
         else
@@ -640,16 +659,17 @@ repair_run() {
 
 airplay_targets_json() {
     need jq
-    # AirPlay video receivers advertise _airplay._tcp over mDNS. Same passive
-    # avahi cache and hardened parse as cast_targets: names are attacker-
-    # controlled, so strip field/line breakers before the tab-delimited handoff.
+    # AirPlay video receivers advertise _airplay._tcp over mDNS. Same avahi read
+    # (cached, or "active" — see avahi_browse) and hardened parse as cast_targets:
+    # names are attacker-controlled, so strip field/line breakers before the
+    # tab-delimited handoff.
     if ! command -v avahi-browse >/dev/null 2>&1; then
         printf '[]\n'
         return 0
     fi
-    local locals
+    local locals mode="${1:-}"
     locals="$(local_addresses_json)"
-    avahi-browse -rpt _airplay._tcp 2>/dev/null \
+    avahi_browse _airplay._tcp "${mode}" \
         | LC_ALL=C awk -F';' '
             function unesc(s,    out, i, c, code) {
                 # avahi -p escapes bytes as decimal \DDD. Decode printable/UTF-8
@@ -697,7 +717,7 @@ airplay_targets_json() {
 }
 
 airplay_targets_text() {
-    airplay_targets_json | jq -r '
+    airplay_targets_json "${1:-}" | jq -r '
         if length == 0 then
             "No AirPlay receivers discovered"
         else
@@ -800,9 +820,9 @@ airplay_pair() {
 
 targets_json() {
     need jq
-    local cc ap
-    cc="$(cast_targets_json 2>/dev/null || printf '[]')"
-    ap="$(airplay_targets_json 2>/dev/null || printf '[]')"
+    local mode="${1:-}" cc ap
+    cc="$(cast_targets_json "${mode}" 2>/dev/null || printf '[]')"
+    ap="$(airplay_targets_json "${mode}" 2>/dev/null || printf '[]')"
     jq -n --argjson chromecast "${cc}" --argjson airplay "${ap}" '
         ( $chromecast | map(. + {capabilities: ["video", "mirror"], connect: "display-cast"}) )
         + ( $airplay   | map(. + {capabilities: ["video"],          connect: "airplay-cast"}) )
@@ -810,7 +830,7 @@ targets_json() {
 }
 
 targets_text() {
-    targets_json | jq -r '
+    targets_json "${1:-}" | jq -r '
         if length == 0 then
             "No cast targets discovered  (Miracast: run kast miracast-targets)"
         else
@@ -1522,7 +1542,7 @@ Usage:
   kast status [--json]
   kast sinks [--json]
   kast pick [--miracast]                 (graphical "cast to…" menu)
-  kast targets [--json]
+  kast targets [--json] [--scan]         (--scan = fresh mDNS queries, not the cache)
   kast connect <name|address> [media-url-or-file]
   kast cast-file <target> <url-or-file>  (play a file on AirPlay or Chromecast)
   kast display-connect <name>
@@ -1533,9 +1553,9 @@ Usage:
                power_on, power_off, key <up|down|left|right|select|menu|home>,
                launch_app <id>)
   kast control-center [<target>]              (graphical remote window)
-  kast cast-targets [--json]
+  kast cast-targets [--json] [--scan]
   kast miracast-targets [--json]
-  kast airplay-targets [--json]
+  kast airplay-targets [--json] [--scan]
   kast airplay-cast <target> <url-or-file>
   kast airplay-pick <target>
   kast airplay-pair <target> [--gui]
@@ -1590,11 +1610,11 @@ case "${cmd}" in
         fi
         ;;
     cast-targets)
-        if [[ "${1:-}" == "--json" ]]; then
-            cast_targets_json
-        else
-            cast_targets_text
-        fi
+        # --json output; --scan issues fresh mDNS queries instead of reading the
+        # avahi cache (used by the tile's explicit Rescan).
+        _json=""; _mode=""
+        for _a in "$@"; do case "${_a}" in --json) _json=1 ;; --scan) _mode="active" ;; esac; done
+        if [[ -n "${_json}" ]]; then cast_targets_json "${_mode}"; else cast_targets_text "${_mode}"; fi
         ;;
     miracast-targets)
         if [[ "${1:-}" == "--json" ]]; then
@@ -1604,11 +1624,9 @@ case "${cmd}" in
         fi
         ;;
     targets)
-        if [[ "${1:-}" == "--json" ]]; then
-            targets_json
-        else
-            targets_text
-        fi
+        _json=""; _mode=""
+        for _a in "$@"; do case "${_a}" in --json) _json=1 ;; --scan) _mode="active" ;; esac; done
+        if [[ -n "${_json}" ]]; then targets_json "${_mode}"; else targets_text "${_mode}"; fi
         ;;
     pick|menu)
         cast_pick "$@"
@@ -1639,11 +1657,9 @@ case "${cmd}" in
         gnd_disconnect
         ;;
     airplay-targets)
-        if [[ "${1:-}" == "--json" ]]; then
-            airplay_targets_json
-        else
-            airplay_targets_text
-        fi
+        _json=""; _mode=""
+        for _a in "$@"; do case "${_a}" in --json) _json=1 ;; --scan) _mode="active" ;; esac; done
+        if [[ -n "${_json}" ]]; then airplay_targets_json "${_mode}"; else airplay_targets_text "${_mode}"; fi
         ;;
     airplay-cast)
         airplay_cast "$@"
