@@ -25,6 +25,12 @@ SHAIRPORT_ARGS=()
 # uncomment to pin a fixed name.
 #YT_RECEIVER_NAME="Kast YouTube"
 
+# With autoplay off (default), deliberately casting a video still plays it, but a
+# device that merely connects to the DIAL receiver can't start playback on its
+# own (DIAL has no pairing, so that would be any device on the LAN). Set to 1 to
+# restore connect-autoplay on a trusted network.
+#KAST_YT_AUTOPLAY=1
+
 # Make "Display Cast…" drop Wi-Fi by default (1) or keep it (0). Needed for
 # Miracast on single-radio adapters. Editable from Kast preferences.
 KAST_DROP_WIFI_DEFAULT=0

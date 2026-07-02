@@ -7,7 +7,8 @@
 // yt-dlp hook. No login is needed for public videos.
 //
 // Env: KAST_YT_NAME (advertised name), KAST_YT_MPV (mpv binary), KAST_YT_PORT,
-// KAST_YT_DLP (yt-dlp binary for mpv's ytdl_hook; kast keeps it self-updated).
+// KAST_YT_DLP (yt-dlp binary for mpv's ytdl_hook; kast keeps it self-updated),
+// KAST_YT_AUTOPLAY (=1 lets a bare DIAL connect start playback; off otherwise).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
@@ -19,6 +20,7 @@ const NAME = process.env.KAST_YT_NAME || 'Kast YouTube';
 const MPV = process.env.KAST_YT_MPV || 'mpv';
 const YTDLP = process.env.KAST_YT_DLP || '';
 const PORT = parseInt(process.env.KAST_YT_PORT || '8009', 10);
+const AUTOPLAY = process.env.KAST_YT_AUTOPLAY === '1';
 // mpv's JSON-IPC socket must NOT live in shared /tmp: anyone who can open it
 // speaks full mpv IPC (load local files, screenshot to arbitrary paths, drive
 // playback, read state). Keep it in a private 0700 dir, preferring the per-uid
@@ -202,10 +204,10 @@ const player = new MpvPlayer();
 const receiver = new YouTubeCastReceiver(player, {
   dial: { port: PORT },
   device: { name: NAME, brand: 'Kast', model: 'kast' },
-  // Autoplay-on-connect: any device that can reach the DIAL port (the whole LAN
-  // — DIAL has no pairing) can start playback unsolicited. By design for a cast
-  // receiver; the unit ships off by default and is meant for a trusted network.
-  app: { enableAutoplayOnConnect: true },
+  // Autoplay-on-connect lets any device that reaches the DIAL port start playback
+  // unsolicited — DIAL has no pairing, so that's the whole LAN. Ships off; opt in
+  // with KAST_YT_AUTOPLAY=1 in uxplay.conf on a trusted network.
+  app: { enableAutoplayOnConnect: AUTOPLAY },
   dataStore: new FileDataStore(path.join(STATE_DIR, 'youtube-receiver.json')),
 });
 

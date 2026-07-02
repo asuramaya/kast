@@ -3,6 +3,28 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-07-02
+
+### Security
+Hardening pass from a full audit of every network-facing input. None of these were remotely
+exploitable for code execution; they close the gaps that mattered most in the trust chain.
+
+- **`kast update` now fetches the installer pinned to the release tag, not `main`.** Previously
+  the updater piped the mutable main branch's `install.sh` to bash, so an update executed
+  whatever was at the tip regardless of the release being installed. It now fetches
+  `install.sh` from the `v<latest>` tag — the same tag whose tarball it then checksum-verifies —
+  so an update never runs unreviewed main-branch code.
+- **YouTube DIAL autoplay-on-connect is now opt-in.** DIAL has no pairing, so with autoplay on,
+  any device on the LAN could start unsolicited playback the moment the receiver ran.
+  Deliberate casts still play; a bare connect no longer can. Restore the old behavior with
+  `KAST_YT_AUTOPLAY=1` in `uxplay.conf` on a trusted network.
+- **`~/.local/state/kast` is now created 0700** (and existing 0755 dirs are tightened). It holds
+  pyatv AirPlay pairing credentials, which were world-readable on shared machines.
+- **`valid_ip` actually validates now**: IPv4 octets are range-checked 0–255 (`999.1.1.1` no
+  longer passes) and the IPv6 form must contain a `:` (a bare hex word no longer passes).
+- **`reconnect_wifi` guards its nmcli call**: the saved connection name (which can derive from
+  an SSID) is passed via the unambiguous `id` selector, and a leading-`-` name is refused.
+
 ## [0.7.0] - 2026-06-19
 
 ### Added
