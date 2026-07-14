@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 asuramaya and kast contributors
+# kast-healthcheck — CLI parity with the family; kast has no daemon to ping
+# (docs/STATUS-SEAM.md: kast is the family's one exempt glue layer), so the
+# verdict here is instead: the status.json seam, when one exists, agrees
+# with live systemd reality. No seam yet is not unhealthy — kast only writes
+# one as a by-product of a verb actually running, and nothing has run since
+# boot is a normal state for a tool with no background service.
+#
+# Exit 0 (healthy) or 1 (unhealthy) + one line, passive — this only reports,
+# it never restarts or repairs anything (that's `kast repair`, on request).
+set -uo pipefail
+
+APP_ID="kast"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${APP_ID}"
+SEAM_FILE="${RUNTIME_DIR}/status.json"
+
+fail() {
+    printf 'kast-healthcheck: UNHEALTHY — %s\n' "$1" >&2
+    exit 1
+}
+
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+
+live_state() {
+    systemctl --user is-active --quiet "$1" 2>/dev/null && printf 'active' || printf 'inactive'
+}
+
+if [[ ! -f "${SEAM_FILE}" ]]; then
+    printf 'kast-healthcheck: ok (no status.json seam yet — kast has no daemon, so nothing has needed to write one)\n'
+    exit 0
+fi
+
+seam="$(cat "${SEAM_FILE}" 2>/dev/null)" || fail "${SEAM_FILE} unreadable"
+jq -e '.version == 1 and has("receivers") and has("devices") and has("session")' >/dev/null 2>&1 <<<"${seam}" \
+    || fail "${SEAM_FILE} malformed (unexpected shape)"
+
+drift=""
+for pair in "uxplay.service airplay_screen" "shairport-sync.service airplay_audio" "kast-youtube.service youtube"; do
+    unit="${pair%% *}"
+    key="${pair#* }"
+    seam_state="$(jq -r --arg k "${key}" '.receivers[$k] // "unknown"' <<<"${seam}")"
+    live="$(live_state "${unit}")"
+    if [[ "${seam_state}" != "${live}" ]]; then
+        drift="${key} says ${seam_state}, systemd says ${live}"
+        break
+    fi
+done
+[[ -z "${drift}" ]] || fail "seam drifted from systemd (${drift}) — re-run any kast verb to refresh"
+
+age=$(( $(date +%s) - $(jq -r '.written_at // 0' <<<"${seam}") ))
+printf 'kast-healthcheck: ok (seam %ds old, receivers match systemd)\n' "${age}"

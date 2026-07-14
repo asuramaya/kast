@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 asuramaya and kast contributors
+# kast-update — CLI parity with the family (bin/<tool>-update in every
+# sibling). kast already has a fail-closed-ish, tag-pinned check/install
+# path in `kast update` / `kast check-update` (see update_run() in
+# bin/kast: it fetches install.sh pinned to the release tag, never main).
+# Rather than duplicate that logic here, this delegates to it outright.
+#
+#   kast-update --check          human-readable: newer release or not
+#   kast-update --check --json   {"current","latest","update_available"}
+#   kast-update                  install (same as `kast update`)
+#
+# Installed by install.sh alongside an opt-in (NOT enabled) systemd user
+# timer — family privacy ruling 2026-07-14: updates are click-to-install,
+# never unattended. kast's tile already checks for updates in-process every
+# 6h; this timer, if a user enables it, is purely CLI/notification parity.
+set -uo pipefail
+
+KAST_LIBDIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "$0")")" && pwd)"
+exec "${KAST_LIBDIR}/kast" update "$@"

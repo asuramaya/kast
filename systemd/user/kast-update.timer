@@ -1,0 +1,15 @@
+[Unit]
+Description=kast daily update check
+
+# NOT enabled by default: installed for CLI/family parity, but kast's Quick
+# Settings tile already checks for updates in-process every 6h — this timer
+# is redundant unless you specifically want a systemd-logged daily check too.
+# Even a notify-only check that phones GitHub is opt-in. Enable deliberately:
+#   systemctl --user enable --now kast-update.timer
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1d
+Persistent=true
+
+[Install]
+WantedBy=timers.target

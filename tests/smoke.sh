@@ -15,6 +15,10 @@ trap 'rm -rf "${TMP_HOME}"' EXIT
 export XDG_CONFIG_HOME="${TMP_HOME}/config"
 export XDG_STATE_HOME="${TMP_HOME}/state"
 export XDG_DATA_HOME="${TMP_HOME}/data"
+export XDG_RUNTIME_DIR="${TMP_HOME}/runtime"
+# TMP_HOME already exists, so -m 700 only sets this one deepest directory.
+# shellcheck disable=SC2174
+mkdir -p -m 700 "${XDG_RUNTIME_DIR}"
 
 pass=0 fail=0
 ok()   { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
@@ -69,6 +73,22 @@ expect_json  "targets --json"          array "${KAST[@]}" targets --json
 expect_json  "cast-targets --scan"     array "${KAST[@]}" cast-targets --scan --json
 expect_json  "targets --scan --json"   array "${KAST[@]}" targets --scan --json
 expect_json  "status --json is object" object "${KAST[@]}" status --json
+
+# --- status.json seam (docs/STATUS-SEAM.md): status is a listed by-product verb ---
+SEAM_FILE="${XDG_RUNTIME_DIR}/kast/status.json"
+if [[ -f "${SEAM_FILE}" ]] && jq -e '
+        .version == 1 and (.written_at | type) == "number"
+        and (.receivers.airplay_screen | IN("active","inactive"))
+        and (.receivers.airplay_audio  | IN("active","inactive"))
+        and (.receivers.youtube        | IN("active","inactive"))
+        and (.devices | type) == "array"
+        and (.session == null or .session.active == true)
+    ' "${SEAM_FILE}" >/dev/null 2>&1
+then
+    ok "status.json seam has the documented shape"
+else
+    bad "status.json seam has the documented shape"
+fi
 
 # --- state round-trips (no hardware) ---
 expect_grep  "get-mode defaults to mirror"   "mirror" "${KAST[@]}" get-mode

@@ -180,12 +180,21 @@ install_user_files() {
     # next to itself).
     install -D -m 755 "${ROOT_DIR}/bin/kast-airplay" "${BIN_DIR}/kast-airplay"
     install -D -m 755 "${ROOT_DIR}/bin/kast-control-center" "${BIN_DIR}/kast-control-center"
+    # Family CLI parity: kast has no daemon (kast-healthcheck checks the
+    # status.json seam instead) and already has a tag-pinned update path
+    # (kast-update delegates to it). Neither changes any default behavior.
+    install -D -m 755 "${ROOT_DIR}/bin/kast-healthcheck" "${BIN_DIR}/kast-healthcheck"
+    install -D -m 755 "${ROOT_DIR}/bin/kast-update" "${BIN_DIR}/kast-update"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
         install -D -m 644 "${ROOT_DIR}/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi
     install -D -m 644 "${ROOT_DIR}/systemd/user/uxplay.service" "${CONFIG_HOME}/systemd/user/uxplay.service"
     install -D -m 644 "${ROOT_DIR}/systemd/user/shairport-sync.service" "${CONFIG_HOME}/systemd/user/shairport-sync.service"
     install -D -m 644 "${ROOT_DIR}/systemd/user/kast-youtube.service" "${CONFIG_HOME}/systemd/user/kast-youtube.service"
+    # Update-check timer: installed for family parity, NOT enabled — the tile
+    # already checks in-process every 6h (see enable_services()).
+    install -D -m 644 "${ROOT_DIR}/systemd/user/kast-update.service" "${CONFIG_HOME}/systemd/user/kast-update.service"
+    install -D -m 644 "${ROOT_DIR}/systemd/user/kast-update.timer" "${CONFIG_HOME}/systemd/user/kast-update.timer"
     install_gnd_dbus_service
     install -D -m 644 "${ROOT_DIR}/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
     # The desktop session's PATH may not include ~/.local/bin, so point the

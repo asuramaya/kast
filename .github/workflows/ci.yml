@@ -25,7 +25,7 @@ jobs:
           fi
 
       - name: ShellCheck
-        run: shellcheck install.sh uninstall.sh bin/kast tests/smoke.sh
+        run: shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck bin/kast-update tests/smoke.sh
 
       - name: Python helpers (syntax)
         run: python3 -m py_compile bin/kast-airplay bin/kast-control-center

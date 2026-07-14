@@ -6,7 +6,7 @@ APP_ID="kast"
 # installed standalone binary (which ships without VERSION beside it) still knows
 # its version. CI asserts the two stay in sync (see .github/workflows/ci.yml and
 # release.yml).
-KAST_VERSION="0.7.2"
+KAST_VERSION="0.7.3"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
@@ -29,6 +29,12 @@ GND_DEST="org.gnome.NetworkDisplays.Daemon"
 GND_OBJ="/org/gnome/NetworkDisplays/Manager"
 GND_IFACE="org.gnome.NetworkDisplays.Manager"
 GND_STREAM_FILE="${STATE_HOME}/${APP_ID}/gnd-stream-unit"
+# status.json seam (docs/STATUS-SEAM.md): a snapshot the pill can read
+# instead of shelling out on every tick. Lives under the runtime dir (dies
+# with the session, so a stale file can never outlive the login that wrote
+# it) — never $STATE_HOME, which is for durable seeds like pairing creds.
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/${APP_ID}"
+STATUS_SEAM_FILE="${RUNTIME_DIR}/status.json"
 # A self-updating, user-local yt-dlp keeps the YouTube receiver working when
 # YouTube changes, without waiting on an apt upgrade. mpv's ytdl_hook is pointed
 # at this copy; a system yt-dlp is used as a fallback when it's unavailable.
@@ -106,6 +112,13 @@ ensure_state_dir() {
     # shellcheck disable=SC2174
     mkdir -p -m 700 "${dir}"
     chmod 700 "${dir}"
+}
+
+ensure_runtime_dir() {
+    # Same reasoning as ensure_state_dir: -m 700 only sets this deepest dir.
+    # shellcheck disable=SC2174
+    mkdir -p -m 700 "${RUNTIME_DIR}" 2>/dev/null || return 1
+    chmod 700 "${RUNTIME_DIR}" 2>/dev/null
 }
 
 active_wifi_connection() {
@@ -339,6 +352,7 @@ status_json() {
             },
             mirror_mode: $mirror_mode
         }'
+    write_status_seam
 }
 
 status_text() {
@@ -785,6 +799,7 @@ airplay_cast() {
     py="$(pyatv_python)"
     # The helper auto-loads any credentials saved by 'kast airplay-pair' (some
     # receivers require pairing; many TVs allow casting without a code).
+    write_status_seam
     exec "${py}" "${AIRPLAY_HELPER}" "${subcmd}" "${addr}" "${media}" "${PYATV_STORAGE}"
 }
 
@@ -927,8 +942,10 @@ gnd_connect() {
     unit="$(busctl --user call "${GND_DEST}" "${GND_OBJ}" "${GND_IFACE}" StartStream s "${uuid}" 2>/dev/null \
         | sed -n 's/^s "\(.*\)"$/\1/p')"
     [[ -n "${unit}" ]] || return 3
-    # Remember the unit (for StopStream) and the target name (for status display).
-    printf '%s\t%s\n' "${unit}" "${name}" > "${GND_STREAM_FILE}"
+    # Remember the unit (for StopStream), the target name (for status display),
+    # and when the stream started (for the status.json seam's session.since).
+    printf '%s\t%s\t%s\n' "${unit}" "${name}" "$(date +%s)" > "${GND_STREAM_FILE}"
+    write_status_seam
     return 0
 }
 
@@ -942,6 +959,7 @@ gnd_disconnect() {
     unit="${line%%$'\t'*}"
     busctl --user call "${GND_DEST}" "${GND_OBJ}" "${GND_IFACE}" StopStream s "${unit}" >/dev/null 2>&1 || true
     rm -f "${GND_STREAM_FILE}"
+    write_status_seam
     printf 'Stopped display stream.\n'
 }
 
@@ -950,23 +968,81 @@ cast_state_json() {
     # user unit, so its liveness is the source of truth; a missing/dead unit
     # means the stream ended (clean up the stale marker).
     need jq
-    local active="false" unit="" target="" line
+    local active="false" unit="" target="" since="" line rest
     if [[ -f "${GND_STREAM_FILE}" ]]; then
         line="$(<"${GND_STREAM_FILE}")"
         unit="${line%%$'\t'*}"
-        target="${line#*$'\t'}"
+        rest="${line#*$'\t'}"
+        [[ "${rest}" == "${line}" ]] && rest=""
+        target="${rest%%$'\t'*}"
+        since="${rest#*$'\t'}"
+        [[ "${since}" == "${rest}" ]] && since=""
         [[ "${target}" == "${unit}" ]] && target=""
         if [[ -n "${unit}" ]] && systemctl --user is-active --quiet "${unit}" 2>/dev/null; then
             active="true"
         else
             rm -f "${GND_STREAM_FILE}"
-            unit=""; target=""
+            unit=""; target=""; since=""
         fi
     fi
-    jq -n --argjson active "${active}" --arg unit "${unit}" --arg target "${target}" \
+    jq -n --argjson active "${active}" --arg unit "${unit}" --arg target "${target}" --arg since "${since}" \
         '{active: $active,
           target: (if $target == "" then null else $target end),
-          unit: (if $unit == "" then null else $unit end)}'
+          unit: (if $unit == "" then null else $unit end),
+          since: (if $since == "" then null else ($since | tonumber) end)}'
+}
+
+write_status_seam() {
+    # Best-effort by-product write (docs/STATUS-SEAM.md): never let a broken
+    # or missing $XDG_RUNTIME_DIR fail the verb that triggered this. Called
+    # from every state-changing verb plus `status`/`targets` — self-contained
+    # (recomputes receivers/devices/session fresh) so any call site can fire
+    # it without threading state through.
+    command -v jq >/dev/null 2>&1 || return 0
+    ensure_runtime_dir || return 0
+
+    local now receiver_active="false" audio_active="false" yt_active="false" devices cast tmp
+    now="$(date +%s)"
+    systemctl --user is-active --quiet uxplay.service 2>/dev/null && receiver_active="true"
+    systemctl --user is-active --quiet shairport-sync.service 2>/dev/null && audio_active="true"
+    systemctl --user is-active --quiet kast-youtube.service 2>/dev/null && yt_active="true"
+
+    # Devices: the cached avahi read (no active scan — this must stay cheap,
+    # it runs as a by-product of ordinary verbs). discovered_at is stamped
+    # "now" for every entry the cache currently returns; since the whole
+    # document ages via written_at, a reader judging staleness from that is
+    # enough without per-device history bookkeeping.
+    devices="$(targets_json 2>/dev/null || printf '[]')"
+    cast="$(cast_state_json 2>/dev/null || printf '{"active":false,"target":null,"unit":null,"since":null}')"
+
+    tmp="$(mktemp "${RUNTIME_DIR}/.status.json.XXXXXX" 2>/dev/null)" || return 0
+    if jq -n \
+        --argjson now "${now}" \
+        --arg receiver "${receiver_active}" \
+        --arg audio "${audio_active}" \
+        --arg youtube "${yt_active}" \
+        --argjson devices "${devices}" \
+        --argjson cast "${cast}" \
+        '{
+            version: 1,
+            written_at: $now,
+            receivers: {
+                airplay_screen: (if $receiver == "true" then "active" else "inactive" end),
+                airplay_audio:  (if $audio    == "true" then "active" else "inactive" end),
+                youtube:        (if $youtube  == "true" then "active" else "inactive" end),
+                checked_at: $now
+            },
+            devices: [ $devices[] | {name, kind: .protocol, addr: (.address // null), discovered_at: $now} ],
+            session: (if $cast.active then
+                {active: true, target: $cast.target, via: "gnd", since: ($cast.since // $now)}
+            else null end)
+        }' > "${tmp}" 2>/dev/null
+    then
+        chmod 0640 "${tmp}" 2>/dev/null
+        mv -f "${tmp}" "${STATUS_SEAM_FILE}" 2>/dev/null
+    else
+        rm -f "${tmp}"
+    fi
 }
 
 display_connect() {
@@ -1196,6 +1272,7 @@ chromecast_cast() {
     if [[ ! "${media}" =~ ^https?:// ]]; then
         [[ -f "${media}" ]] || die "File not found: ${media}"
     fi
+    write_status_seam
     exec catt --device "${name}" cast "${media}"
 }
 
@@ -1291,6 +1368,7 @@ toggle_receiver() {
     else
         systemctl --user start uxplay.service
     fi
+    write_status_seam
 }
 
 # --- AirPlay AUDIO receiver (shairport-sync) --------------------------------
@@ -1316,6 +1394,7 @@ toggle_audio_receiver() {
     else
         systemctl --user start shairport-sync.service
     fi
+    write_status_seam
 }
 
 # --- YouTube DIAL receiver (yt-cast-receiver + mpv) -------------------------
@@ -1432,6 +1511,7 @@ toggle_youtube_receiver() {
     else
         systemctl --user start kast-youtube.service
     fi
+    write_status_seam
 }
 
 DOCTOR_OK=0
@@ -1702,6 +1782,7 @@ case "${cmd}" in
         _json=""; _mode=""
         for _a in "$@"; do case "${_a}" in --json) _json=1 ;; --scan) _mode="active" ;; esac; done
         if [[ -n "${_json}" ]]; then targets_json "${_mode}"; else targets_text "${_mode}"; fi
+        write_status_seam
         ;;
     pick|menu)
         cast_pick "$@"
@@ -1791,12 +1872,15 @@ case "${cmd}" in
         ;;
     receiver-start)
         systemctl --user start uxplay.service
+        write_status_seam
         ;;
     receiver-stop)
         systemctl --user stop uxplay.service
+        write_status_seam
         ;;
     receiver-restart)
         systemctl --user restart uxplay.service
+        write_status_seam
         ;;
     receiver-status)
         receiver_status
@@ -1809,12 +1893,15 @@ case "${cmd}" in
         ;;
     audio-receiver-start)
         systemctl --user start shairport-sync.service
+        write_status_seam
         ;;
     audio-receiver-stop)
         systemctl --user stop shairport-sync.service
+        write_status_seam
         ;;
     audio-receiver-restart)
         systemctl --user restart shairport-sync.service
+        write_status_seam
         ;;
     audio-receiver-status)
         audio_receiver_status
@@ -1827,12 +1914,15 @@ case "${cmd}" in
         ;;
     youtube-receiver-start)
         systemctl --user start kast-youtube.service
+        write_status_seam
         ;;
     youtube-receiver-stop)
         systemctl --user stop kast-youtube.service
+        write_status_seam
         ;;
     youtube-receiver-restart)
         systemctl --user restart kast-youtube.service
+        write_status_seam
         ;;
     youtube-receiver-status)
         youtube_receiver_status

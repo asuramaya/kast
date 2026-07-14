@@ -3,6 +3,31 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-07-14
+
+Implements the status.json seam designed in v0.7.2 (docs/STATUS-SEAM.md), plus
+CLI parity bins for the family. No installed-path or default-behavior changes.
+
+### Added
+- **`$XDG_RUNTIME_DIR/kast/status.json` seam.** Every state-changing verb
+  (`connect`, `disconnect`, `cast-file`, the receiver/audio/youtube
+  start/stop/restart/toggle verbs) and the `status`/`targets` read verbs now
+  write a snapshot (receivers, discovered devices, the active gnd session) as
+  a by-product — atomic tmp+rename, dir 0700, file 0640. The Quick Settings
+  tile reads it for an instant render on menu-open and watches it with a
+  `Gio.FileMonitor` so CLI-driven changes appear between its 10s/20s polling
+  ticks, falling back to today's shell-out whenever the file is absent (older
+  CLI, first run before any verb has executed).
+- **`bin/kast-healthcheck`** — kast has no daemon to ping, so the verdict is
+  the seam (when one exists) agreeing with live `systemctl --user` state.
+  Exit 0/1 + one line, family shape.
+- **`bin/kast-update`** — CLI parity with the family; a thin delegator to the
+  existing `kast update` / `kast check-update` (already tag-pinned, already
+  fail-closed on a missing latest tag), not a reimplementation. Installed
+  with an opt-in `kast-update.timer` (not enabled — the tile already checks
+  every 6h in-process; family privacy ruling 2026-07-14 keeps updates
+  click-to-install, never unattended).
+
 ## [0.7.2] - 2026-07-14
 
 Repo-shape alignment with the family codex. Installed paths (`~/.local/bin/kast`

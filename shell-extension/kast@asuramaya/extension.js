@@ -9,6 +9,47 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const CLI_PATH = `${GLib.get_home_dir()}/.local/bin/kast`;
 
+// docs/STATUS-SEAM.md: a snapshot the CLI writes as a by-product of its own
+// verbs. When present, reading it renders the cast menu instantly instead of
+// waiting on a subprocess; when absent (older CLI, first run before any verb
+// has executed), every code path below falls back to the shell-out it always
+// used, unchanged.
+const SEAM_PATH = `${GLib.get_user_runtime_dir()}/kast/status.json`;
+// ~3x the 20s discovery tick (STATUS-SEAM.md's "ages everywhere" guidance) —
+// a reader judges staleness itself rather than the seam ever lying about it.
+const SEAM_STALE_SEC = 90;
+
+// Reads the seam synchronously — a small local file, not a subprocess fan-out,
+// so a blocking read here is negligible. Returns null on any failure (absent,
+// malformed, wrong shape) so callers can fall back without special-casing.
+function readSeam() {
+    try {
+        const [ok, contents] = Gio.File.new_for_path(SEAM_PATH).load_contents(null);
+        if (!ok)
+            return null;
+        const doc = JSON.parse(new TextDecoder().decode(contents));
+        return (doc && typeof doc === 'object' && doc.version === 1) ? doc : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// Seam devices (one flat list, {name, kind, addr, discovered_at}) into the
+// {cast, airplay} shape _renderCast already expects.
+function seamDevicesToTargets(devices) {
+    const cast = [], airplay = [];
+    const now = Math.floor(Date.now() / 1000);
+    for (const d of devices ?? []) {
+        const stale = !!d.discovered_at && (now - d.discovered_at) > SEAM_STALE_SEC;
+        const entry = {name: d.name, address: d.addr ?? undefined, stale};
+        if (d.kind === 'chromecast')
+            cast.push(entry);
+        else if (d.kind === 'airplay')
+            airplay.push(entry);
+    }
+    return {cast, airplay};
+}
+
 function runKast(args) {
     // Fire the command but still watch its exit: from the tile there is no
     // terminal, so a failed cast/connect would otherwise vanish silently. On a
@@ -153,16 +194,18 @@ class KastToggle extends QuickMenuToggle {
             m.addMenuItem(dim('Chromecast'));
             for (const t of castTargets) {
                 const name = t.name || t.address || 'Device';
-                m.addAction(`${name} — mirror screen`, () => runKast(['display-connect', name]));
+                const label = t.stale ? `${name} (stale)` : name;
+                m.addAction(`${label} — mirror screen`, () => runKast(['display-connect', name]));
                 if (canFile)
-                    m.addAction(`${name} — cast file…`, () => runKast(['cast-file-pick', name]));
+                    m.addAction(`${label} — cast file…`, () => runKast(['cast-file-pick', name]));
             }
         }
         if (airplayTargets.length) {
             m.addMenuItem(dim('AirPlay'));
             for (const t of airplayTargets) {
                 const ref = t.address || t.name;
-                m.addAction(`${t.name || ref || 'Receiver'} — cast file…`, () => runKast(['airplay-pick', ref]));
+                const label = t.stale ? `${t.name || ref || 'Receiver'} (stale)` : (t.name || ref || 'Receiver');
+                m.addAction(`${label} — cast file…`, () => runKast(['airplay-pick', ref]));
             }
         }
         if (miracastTargets.length) {
@@ -222,8 +265,18 @@ class KastIndicator extends SystemIndicator {
         this._toggle = new KastToggle(onPrefs);
         this._toggle.onRescanCast = () => this._rescanCast();
         this._toggle.onScanMiracast = () => this._scanMiracast();
-        this._toggle.onCastMenuOpen = () => this._discoverAll(true);
+        this._toggle.onCastMenuOpen = () => {
+            // Instant render from the seam (if kast has written one), then
+            // still kick off the live active scan as before — the seam only
+            // removes the *blocking* wait, it doesn't replace the refresh.
+            this._seedFromSeam();
+            this._discoverAll(true);
+        };
         this.quickSettingsItems.push(this._toggle);
+
+        this._seamMonitor = null;
+        this._seedFromSeam();
+        this._watchSeam();
 
         this._refresh();
         this._statusTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, () => {
@@ -248,6 +301,32 @@ class KastIndicator extends SystemIndicator {
     _discoverAll(active = false) {
         this._discoverCastTargets(active);
         this._discoverAirplayTargets(active);
+    }
+
+    _seedFromSeam() {
+        const doc = readSeam();
+        if (!doc)
+            return;
+        const {cast, airplay} = seamDevicesToTargets(doc.devices);
+        this._data.castTargets = cast;
+        this._data.airplayTargets = airplay;
+        this._render();
+    }
+
+    _watchSeam() {
+        // Fires on CLI-driven changes (a verb run from a terminal, the tile's
+        // own commands, systemd units) so they appear between ticks instead
+        // of waiting on the 10s/20s timers. Watching a not-yet-existing path
+        // is fine — Gio notifies on CREATED once kast writes it the first time.
+        try {
+            this._seamMonitor = Gio.File.new_for_path(SEAM_PATH).monitor_file(Gio.FileMonitorFlags.NONE, null);
+            this._seamMonitor.connect('changed', (_m, _f, _of, event) => {
+                if (event === Gio.FileMonitorEvent.CHANGED || event === Gio.FileMonitorEvent.CREATED)
+                    this._seedFromSeam();
+            });
+        } catch (error) {
+            logError(error, 'kast: could not watch status.json seam');
+        }
     }
 
     _render() {
@@ -350,6 +429,8 @@ class KastIndicator extends SystemIndicator {
                 GLib.source_remove(id);
         }
         this._statusTimer = this._discoverTimer = this._updateTimer = 0;
+        this._seamMonitor?.cancel();
+        this._seamMonitor = null;
         this.quickSettingsItems.forEach(item => item.destroy());
         super.destroy();
     }

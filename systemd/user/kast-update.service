@@ -1,0 +1,11 @@
+[Unit]
+Description=kast daily update check (notify-only, never installs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# --check is notify-only: it queries GitHub and logs, it never installs
+# unattended (family doctrine: updates are click-to-install, same as the
+# Kast tile's own update button). See kast-update / update_run() in bin/kast.
+ExecStart=%h/.local/bin/kast-update --check
