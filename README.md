@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/asuramaya/kast/actions/workflows/ci.yml/badge.svg)](https://github.com/asuramaya/kast/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/asuramaya/kast?sort=semver)](https://github.com/asuramaya/kast/releases/latest)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 `Kast` brings a **Windows `Win+K`-style cast panel** to GNOME on Ubuntu (25.10 / 26.04,
 GNOME Shell 49–50) — as a native **Quick Settings tile**. Open the system menu, pick a

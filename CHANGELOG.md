@@ -5,11 +5,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.2] - 2026-07-14
 
-Repo-shape alignment with the family codex — no behavior change. Installed paths
-(`~/.local/bin/kast` and friends), systemd user units, the D-Bus activation file,
-and the desktop entry are byte-identical; an installed system sees nothing.
+Repo-shape alignment with the family codex. Installed paths (`~/.local/bin/kast`
+and friends), systemd user units, the D-Bus activation file, and the desktop
+entry are byte-identical; an installed system sees no functional change.
 
 ### Changed
+- **License: MIT → GPLv3.** A deliberate relicense, unifying kast with the rest
+  of the asuramaya project family under GPLv3. See [LICENSE](LICENSE).
 - **Repo layout: `scripts/` is now `bin/`**, matching the family convention. Every
   reference moved with it (installer, CI, release workflow, tests, docs). The CLI
   still finds its helpers next to itself, so nothing else changes.
