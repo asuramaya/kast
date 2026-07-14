@@ -17,18 +17,18 @@ jobs:
       - name: VERSION matches KAST_VERSION
         run: |
           file="$(tr -d '[:space:]' < VERSION)"
-          script="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' scripts/kast)"
+          script="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' bin/kast)"
           echo "VERSION=${file} script=${script}"
           if [ "${file}" != "${script}" ]; then
-            echo "::error::VERSION ${file} does not match KAST_VERSION ${script} in scripts/kast"
+            echo "::error::VERSION ${file} does not match KAST_VERSION ${script} in bin/kast"
             exit 1
           fi
 
       - name: ShellCheck
-        run: shellcheck install.sh uninstall.sh scripts/kast tests/smoke.sh
+        run: shellcheck install.sh uninstall.sh bin/kast tests/smoke.sh
 
       - name: Python helpers (syntax)
-        run: python3 -m py_compile scripts/kast-airplay scripts/kast-control-center
+        run: python3 -m py_compile bin/kast-airplay bin/kast-control-center
 
       - name: Shell extension (syntax)
         run: |

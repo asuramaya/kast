@@ -17,14 +17,14 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME#v}"
           file="$(tr -d '[:space:]' < VERSION)"
-          script="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' scripts/kast)"
+          script="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' bin/kast)"
           echo "tag=${tag} VERSION=${file} script=${script}"
           if [ "${tag}" != "${file}" ]; then
             echo "::error::tag ${tag} does not match VERSION ${file}"
             exit 1
           fi
           if [ "${file}" != "${script}" ]; then
-            echo "::error::VERSION ${file} does not match KAST_VERSION ${script} in scripts/kast"
+            echo "::error::VERSION ${file} does not match KAST_VERSION ${script} in bin/kast"
             exit 1
           fi
 

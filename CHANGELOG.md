@@ -3,6 +3,26 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-07-14
+
+Repo-shape alignment with the family codex — no behavior change. Installed paths
+(`~/.local/bin/kast` and friends), systemd user units, the D-Bus activation file,
+and the desktop entry are byte-identical; an installed system sees nothing.
+
+### Changed
+- **Repo layout: `scripts/` is now `bin/`**, matching the family convention. Every
+  reference moved with it (installer, CI, release workflow, tests, docs). The CLI
+  still finds its helpers next to itself, so nothing else changes.
+
+### Added
+- **`Makefile`** in the family idiom: `make smoke` (the CLI smoke tests),
+  `make pill` (per-user install of the Quick Settings extension — never root),
+  and `make install` / `make uninstall` guidance wrappers around the existing
+  installers (kast is user-scope; they refuse to run as root).
+- **`docs/STATUS-SEAM.md`** — a design document (not yet implemented) for kast's
+  status.json seam: what belongs in it, where it lives
+  (`$XDG_RUNTIME_DIR/kast/status.json`), who writes it, and what the tile gains.
+
 ## [0.7.1] - 2026-07-02
 
 ### Security

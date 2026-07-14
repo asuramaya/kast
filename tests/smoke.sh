@@ -7,7 +7,7 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-KAST=(bash "${ROOT_DIR}/scripts/kast")
+KAST=(bash "${ROOT_DIR}/bin/kast")
 
 # Sandbox all reads/writes into a temp XDG tree.
 TMP_HOME="$(mktemp -d)"

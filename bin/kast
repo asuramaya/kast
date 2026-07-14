@@ -6,7 +6,7 @@ APP_ID="kast"
 # installed standalone binary (which ships without VERSION beside it) still knows
 # its version. CI asserts the two stay in sync (see .github/workflows/ci.yml and
 # release.yml).
-KAST_VERSION="0.7.1"
+KAST_VERSION="0.7.2"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"

@@ -174,9 +174,9 @@ If you want `Ctrl+K` instead of `Super+K`: `KAST_SHORTCUT='<Primary>k' ./install
 
 - [install.sh](install.sh): bootstrap entrypoint (self-bootstraps when piped from curl)
 - [uninstall.sh](uninstall.sh): symmetric uninstaller (`--purge` also removes config/state)
-- [scripts/kast](scripts/kast): runtime CLI; the extension shells out to `kast … --json`
-- [scripts/kast-airplay](scripts/kast-airplay): Python helper driving `pyatv` (AirPlay out + control)
-- [scripts/kast-control-center](scripts/kast-control-center): GTK4/Adwaita Control Center window
+- [bin/kast](bin/kast): runtime CLI; the extension shells out to `kast … --json`
+- [bin/kast-airplay](bin/kast-airplay): Python helper driving `pyatv` (AirPlay out + control)
+- [bin/kast-control-center](bin/kast-control-center): GTK4/Adwaita Control Center window
 - [youtube-receiver/](youtube-receiver): the Node DIAL receiver (`yt-cast-receiver` + `mpv`)
 - [shell-extension/kast@asuramaya/](shell-extension/kast@asuramaya): the Quick Settings UI (`extension.js` tile + `prefs.js` dialog)
 - [systemd/user/](systemd/user): the off-by-default receiver services (uxplay / shairport-sync / kast-youtube)

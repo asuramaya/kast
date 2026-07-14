@@ -7,7 +7,7 @@ casting tools. Contributions that keep it simple and dependency-light are very w
 
 | Path | What |
 |------|------|
-| `scripts/kast` | the CLI (bash); the source of truth, run by every other piece |
+| `bin/kast` | the CLI (bash); the source of truth, run by every other piece |
 | `shell-extension/kast@asuramaya/` | the UI — GNOME Quick Settings tiles (GJS) |
 | `install.sh` / `uninstall.sh` | user-scope (de)installer |
 | `systemd/user/`, `config/`, `applications/` | installed unit/config/desktop files |
@@ -21,15 +21,15 @@ cd kast
 kast doctor               # confirm the stack is healthy
 ```
 
-Iterate on `scripts/kast` directly (`bash scripts/kast <cmd>`), then re-run
+Iterate on `bin/kast` directly (`bash bin/kast <cmd>`), then re-run
 `./install.sh --skip-apt` to update the installed copy.
 
 ## Run the checks locally (same as CI)
 
 ```bash
-shellcheck install.sh uninstall.sh scripts/kast      # reads .shellcheckrc
+shellcheck install.sh uninstall.sh bin/kast      # reads .shellcheckrc
 node --check shell-extension/kast@asuramaya/extension.js
-bash scripts/kast version && bash scripts/kast --help
+bash bin/kast version && bash bin/kast --help
 ```
 
 The extension can't be hot-reloaded on Wayland — test it by reinstalling
@@ -45,7 +45,7 @@ The extension can't be hot-reloaded on Wayland — test it by reinstalling
 
 ## Releasing
 
-1. Bump `KAST_VERSION` in `scripts/kast`.
+1. Bump `KAST_VERSION` in `bin/kast`.
 2. Add a `CHANGELOG.md` entry.
 3. Tag `vX.Y.Z` and push it — `release.yml` asserts the tag matches `KAST_VERSION`,
    builds `kast.tar.gz` + `.sha256`, and publishes a GitHub Release.

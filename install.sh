@@ -74,16 +74,16 @@ bootstrap_from_release() {
     exit $?
 }
 
-if [[ ! -f "${ROOT_DIR}/scripts/kast" ]]; then
+if [[ ! -f "${ROOT_DIR}/bin/kast" ]]; then
     bootstrap_from_release "$@"
 fi
 
 # The repo-root VERSION file is the source of truth; fall back to the value
-# embedded in scripts/kast for tarballs that predate the VERSION file.
+# embedded in bin/kast for tarballs that predate the VERSION file.
 if [[ -f "${ROOT_DIR}/VERSION" ]]; then
     KAST_VERSION="$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION")"
 else
-    KAST_VERSION="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' "${ROOT_DIR}/scripts/kast" 2>/dev/null)"
+    KAST_VERSION="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' "${ROOT_DIR}/bin/kast" 2>/dev/null)"
 fi
 KAST_VERSION="${KAST_VERSION:-unknown}"
 
@@ -175,11 +175,11 @@ install_gnd_dbus_service() {
 install_user_files() {
     mkdir -p "${BIN_DIR}"
     install -D -m 644 "${ROOT_DIR}/config/pipewire/50-raop.conf" "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
-    install -D -m 755 "${ROOT_DIR}/scripts/kast" "${BIN_DIR}/kast"
+    install -D -m 755 "${ROOT_DIR}/bin/kast" "${BIN_DIR}/kast"
     # AirPlay video-out helper + Adwaita control-center window (kast finds them
     # next to itself).
-    install -D -m 755 "${ROOT_DIR}/scripts/kast-airplay" "${BIN_DIR}/kast-airplay"
-    install -D -m 755 "${ROOT_DIR}/scripts/kast-control-center" "${BIN_DIR}/kast-control-center"
+    install -D -m 755 "${ROOT_DIR}/bin/kast-airplay" "${BIN_DIR}/kast-airplay"
+    install -D -m 755 "${ROOT_DIR}/bin/kast-control-center" "${BIN_DIR}/kast-control-center"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
         install -D -m 644 "${ROOT_DIR}/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi
