@@ -42,7 +42,12 @@ kast namespaces="kast-release,pills-tag" sk-ssh-ed25519@openssh.com AAAAGnNrLXNz
 
 # Has a real key been provisioned, or is this still the empty placeholder?
 # allowed_signers lines are "principal [options] keytype base64key"; absent,
-# empty, or whitespace-only counts as "no key yet".
+# empty, or whitespace-only counts as "no key yet". Optional $1 (a file path)
+# is used by tests/test_signing.sh to check arbitrary fixture files directly;
+# install.sh's own call site always uses the no-arg form (the global
+# RELEASE_ALLOWED_SIGNERS) — shellcheck can't see the test file's call sites
+# from here, so it can't tell $1 is ever really used.
+# shellcheck disable=SC2120,SC2119
 has_signing_key() {
     local f="${1:-}"
     if [[ -n "${f}" ]]; then
