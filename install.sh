@@ -17,23 +17,86 @@ WITH_YOUTUBE=0
 WITH_AIRPLAY_AUDIO=0
 PACKAGE_STATUS_NOTE=""
 
+# principal = WHO (kast's stable identity); namespace = WHAT-FOR (what this
+# signature authorizes). Never conflate the two — see ~/code/REPOS/RELEASE.md.
+SIGN_PRINCIPAL="kast"
+SIGN_NAMESPACE="kast-release"
+
+# Trust anchor for the curl-pipe-bash bootstrap below, EMBEDDED directly:
+# `curl .../install.sh | bash` fetches this ONE file over the network, so at
+# that point there is no sibling release-signing/allowed_signers to read.
+# Ships empty until a key is provisioned; kept in sync with
+# release-signing/allowed_signers by `make sync-signers`
+# (tools/sync-signers.sh) — never hand-edit this. Single-quoted deliberately:
+# the value can span multiple lines (one per pinned key) and must never be
+# shell-interpolated. While empty, verification degrades to sha256-only with
+# a printed warning — kast has no unattended install path (every bootstrap or
+# `kast update` is a human-clicked or human-typed action), so this one policy
+# covers both a first install and every later update; see
+# docs/RELEASE-SIGNING.md.
+RELEASE_ALLOWED_SIGNERS=''
+
+# Has a real key been provisioned, or is this still the empty placeholder?
+# allowed_signers lines are "principal [options] keytype base64key"; absent,
+# empty, or whitespace-only counts as "no key yet".
+has_signing_key() {
+    local f="${1:-}"
+    if [[ -n "${f}" ]]; then
+        [[ -s "${f}" ]] && grep -q '[^[:space:]]' "${f}"
+    else
+        [[ -n "${RELEASE_ALLOWED_SIGNERS// }" ]]
+    fi
+}
+
+# True/false: does the detached signature in $2 (a file path) verify $1 (a
+# file path, the exact bytes that were signed) against the pinned key(s) in
+# $3 (an allowed_signers path), for principal $4 and namespace $5? Principal
+# is WHO (kast's identity); namespace is WHAT-FOR (what this signature
+# authorizes) — a signature made for a different purpose, or by a principal
+# not pinned in allowed_signers, must not verify here.
+verify_signature() {
+    local data_file="$1" sig_file="$2" signers="$3" principal="$4" ns="$5"
+    ssh-keygen -Y verify -f "${signers}" -I "${principal}" -n "${ns}" -s "${sig_file}" \
+        < "${data_file}" >/dev/null 2>&1
+}
+
+# tests/test_signing.sh sources this file (with KAST_INSTALL_SOURCED=1) to
+# reach has_signing_key/verify_signature directly, without running an actual
+# install — everything below this point only ever DEFINES functions/vars, so
+# returning here before the bootstrap trigger keeps sourcing side-effect-free.
+# `exit 0` only fires when this script is run directly rather than sourced
+# (where `return` errors) — shellcheck can't see that branch is reachable.
+if [[ "${KAST_INSTALL_SOURCED:-0}" == "1" ]]; then
+    # shellcheck disable=SC2317
+    return 0 2>/dev/null || exit 0
+fi
+
 verify_release_tarball() {
-    # Verify the downloaded release tarball against its published SHA-256 asset
-    # (kast.tar.gz.sha256, content "<hash>  kast.tar.gz") before we extract and
-    # execute it. We refuse rather than fall back to "unverified" here: the
-    # release path is supposed to be verifiable, so a missing checksum or a
-    # mismatch means something is wrong, not that we should trust it anyway.
-    # (The main-branch fallback has no such asset and is gated by its own loud
-    # warning + KAST_NO_UNSTABLE instead.)
-    local tarball="$1" want got
+    # Verify the downloaded release tarball against its published SHA-256
+    # manifest (kast.tar.gz.sha256), then — once a release-signing key is
+    # provisioned — that manifest's SSH signature against the embedded trust
+    # anchor (docs/RELEASE-SIGNING.md). We refuse rather than fall back to
+    # "unverified" here: the release path is supposed to be verifiable, so a
+    # missing checksum or a mismatch means something is wrong, not that we
+    # should trust it anyway. (The main-branch fallback has no such asset and
+    # is gated by its own loud warning + KAST_NO_UNSTABLE instead.)
+    #
+    # $2 (tmp) is the caller's temp dir — its own EXIT trap cleans it up, so
+    # nothing here needs one of its own.
+    local tarball="$1" tmp="$2" base="https://github.com/${REPO_SLUG}/releases/latest/download" \
+          sums want got
     command -v sha256sum >/dev/null 2>&1 || {
         printf 'sha256sum not found; cannot verify the release download. Install coreutils and retry.\n' >&2
         exit 1
     }
-    want="$(curl -fsSL "https://github.com/${REPO_SLUG}/releases/latest/download/kast.tar.gz.sha256" 2>/dev/null \
-        | awk '$2 == "kast.tar.gz" { print $1; exit }')"
-    if [[ -z "${want}" ]]; then
+    sums="${tmp}/kast.tar.gz.sha256"
+    if ! curl -fsSL "${base}/kast.tar.gz.sha256" -o "${sums}"; then
         printf 'Could not fetch the release checksum (kast.tar.gz.sha256); refusing to install an unverified download.\n' >&2
+        exit 1
+    fi
+    want="$(awk '$2 == "kast.tar.gz" { print $1; exit }' "${sums}")"
+    if [[ -z "${want}" ]]; then
+        printf 'Release checksum file has no entry for kast.tar.gz; refusing to install an unverified download.\n' >&2
         exit 1
     fi
     got="$(sha256sum "${tarball}" | awk '{ print $1 }')"
@@ -42,6 +105,34 @@ verify_release_tarball() {
         exit 1
     fi
     printf 'Verified release checksum.\n'
+
+    # Signature over that checksum manifest (the exact bytes fetched above),
+    # against the embedded trust anchor. Signing the (small) manifest rather
+    # than the tarball directly still covers the tarball transitively, via
+    # the hash check above.
+    if ! has_signing_key; then
+        printf 'warning: no release-signing key provisioned yet — proceeding on sha256 alone.\n' >&2
+        printf '         See docs/RELEASE-SIGNING.md.\n' >&2
+        return 0
+    fi
+    command -v ssh-keygen >/dev/null 2>&1 || {
+        printf 'ssh-keygen not found; cannot verify the release signature. Aborting.\n' >&2
+        exit 1
+    }
+    local sig="${tmp}/kast.tar.gz.sha256.sig" signers="${tmp}/allowed_signers"
+    if ! curl -fsSL "${base}/kast.tar.gz.sha256.sig" -o "${sig}"; then
+        printf 'Could not fetch the release signature; refusing unsigned install.\n' >&2
+        exit 1
+    fi
+    # No added newline: RELEASE_ALLOWED_SIGNERS is embedded byte-for-byte from
+    # the anchor file by `make sync-signers`, trailing newline included — that
+    # exact-copy invariant is what CI's signing-sync check enforces.
+    printf '%s' "${RELEASE_ALLOWED_SIGNERS}" > "${signers}"
+    if ! verify_signature "${sums}" "${sig}" "${signers}" "${SIGN_PRINCIPAL}" "${SIGN_NAMESPACE}"; then
+        printf 'Signature verification FAILED; refusing to install.\n' >&2
+        exit 1
+    fi
+    printf 'Verified release signature.\n'
 }
 
 bootstrap_from_release() {
@@ -65,7 +156,7 @@ bootstrap_from_release() {
     fi
     # Released tarballs are verified against their published checksum; the
     # main-branch fallback is inherently unverifiable (already warned above).
-    [[ "${from_release}" -eq 1 ]] && verify_release_tarball "${tarball}"
+    [[ "${from_release}" -eq 1 ]] && verify_release_tarball "${tarball}" "${tmp}"
     tar -xzf "${tarball}" -C "${tmp}"
     inner="$(find "${tmp}" -maxdepth 2 -name install.sh -type f | head -n1)"
     [[ -n "${inner}" ]] || { printf 'install.sh not found in archive\n' >&2; exit 1; }

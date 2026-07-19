@@ -1,8 +1,14 @@
 # kast — the cast demon
-.PHONY: smoke install uninstall pill
+.PHONY: smoke install uninstall pill sync-signers
 
 smoke:
 	bash tests/smoke.sh
+	bash tests/test_signing.sh
+
+# rebuild release-signing/allowed_signers from the canonical keys (see
+# docs/RELEASE-SIGNING.md — do NOT run casually; see the sequencing rule there)
+sync-signers:
+	bash tools/sync-signers.sh
 
 # kast has no root half: install.sh is user-scope end to end (it sudos
 # internally for apt only). Running it AS root would install into root's

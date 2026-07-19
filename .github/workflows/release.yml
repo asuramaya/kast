@@ -36,6 +36,17 @@ jobs:
           echo "--- contents ---"
           tar -tzf kast.tar.gz
 
+      # No signing step here, deliberately: kast-update / install.sh trust an
+      # SSH signature (ssh-keygen -Y verify) against a key pinned INSIDE the
+      # client (release-signing/allowed_signers, docs/RELEASE-SIGNING.md),
+      # precisely so that this CI (or the GitHub account behind it) is not the
+      # trust root. A secret/hardware key living in Actions secrets would let
+      # anyone who compromises the account or the workflow sign whatever they
+      # just pushed — that defeats the entire scheme. The release ships
+      # UNSIGNED from here; the operator signs the checksum manifest's exact
+      # published bytes BY HAND, offline, with the physical FIDO2 key, and runs
+      # `gh release upload <tag> kast.tar.gz.sha256.sig --clobber` after.
+
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

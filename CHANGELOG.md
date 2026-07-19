@@ -3,6 +3,39 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-07-19
+
+Lands the family's release-signing mechanism (`~/code/REPOS/RELEASE.md`), with
+the trust anchor shipped **empty and inert** — no behavior change until the
+operator's first signed release arms it. See docs/RELEASE-SIGNING.md.
+
+### Added
+- **`release-signing/allowed_signers`** — the (currently empty) SSH-signature
+  trust anchor, plus a byte-identical embedded twin (`RELEASE_ALLOWED_SIGNERS`)
+  in `install.sh` for the curl-pipe bootstrap, which can't read a sibling file
+  over the network.
+- **Two-step release verification** in `install.sh`'s `bootstrap_from_release()`
+  (reached by both a fresh install and every `kast update`): sha256 against
+  the published checksum manifest, then — once a key is provisioned —
+  `ssh-keygen -Y verify` of that manifest's detached signature, with principal
+  (`kast`) and namespace (`kast-release`) kept deliberately distinct. Degrades
+  to sha256-only with a warning while unarmed; fails closed once a real key
+  and a matching release exist.
+- **`tools/sync-signers.sh`** / `make sync-signers` — rebuilds the anchor (and
+  its embedded twin) from the operator's 4 canonical FIDO2 pubkeys
+  (`~/.ssh/asuramaya-master/`), always a full rebuild, never an append.
+- **`.github/workflows/signing-sync.yml`** — CI check asserting the anchor and
+  its embedded copy are either both empty or both a well-formed, identical
+  4-key set.
+- **`tests/test_signing.sh`** — adversarial coverage of the verify path
+  (tampered manifest, wrong namespace, wrong principal, untrusted key) using
+  a throwaway non-hardware key; the mechanism doesn't care what backs a
+  signing key, only that a valid signature exists.
+
+### Ratified exemption
+kast ships tarball-only for this pass — no `.deb` (per-user glue, not debt;
+see docs/RELEASE-SIGNING.md).
+
 ## [0.7.3] - 2026-07-14
 
 Implements the status.json seam designed in v0.7.2 (docs/STATUS-SEAM.md), plus
