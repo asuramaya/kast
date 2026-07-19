@@ -34,7 +34,11 @@ SIGN_NAMESPACE="kast-release"
 # `kast update` is a human-clicked or human-typed action), so this one policy
 # covers both a first install and every later update; see
 # docs/RELEASE-SIGNING.md.
-RELEASE_ALLOWED_SIGNERS=''
+RELEASE_ALLOWED_SIGNERS='kast namespaces="kast-release,pills-tag" sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIAvqlv848gk9uzM40ZsFZTQeXsQKpxYaK4Fi8ubNl1H7AAAAFnNzaDphc3VyYW1heWEtbWFzdGVyLTE= ra-master-1
+kast namespaces="kast-release,pills-tag" sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIFJBKAsk6b4YR2UH/UZ1Rk24PxepTYNkF7zflo01AmlZAAAAFnNzaDphc3VyYW1heWEtbWFzdGVyLTI= ra-master-2
+kast namespaces="kast-release,pills-tag" sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIHTVqgo3ARbpTq04YlQksobfGIbBAw21nbE6HyeCPgxBAAAAFnNzaDphc3VyYW1heWEtbWFzdGVyLTM= ra-master-3
+kast namespaces="kast-release,pills-tag" sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIP15ZeSJYWryHN2WEHDlJbWk/vA+j5JFgb9RSzT1SHveAAAAFnNzaDphc3VyYW1heWEtbWFzdGVyLTQ= ra-master-4
+'
 
 # Has a real key been provisioned, or is this still the empty placeholder?
 # allowed_signers lines are "principal [options] keytype base64key"; absent,
