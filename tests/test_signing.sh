@@ -16,10 +16,22 @@ fi
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
-# --- the shipped placeholder must be empty: no key provisioned yet ----------
-[[ -s "$HERE/release-signing/allowed_signers" ]] \
-  && fail "release-signing/allowed_signers must ship empty until a real key is provisioned — see docs/RELEASE-SIGNING.md"
-echo "shipped allowed_signers is the empty placeholder OK"
+# --- the shipped anchor is either the empty placeholder OR a well-formed,
+# armed 4-key set — never partial, never malformed. Mirrors the shape check
+# in .github/workflows/signing-sync.yml; this can't confirm the keys are the
+# operator's actual canonical set (CI can't reach ~/.ssh/asuramaya-master),
+# only that the anchor's shape is sane either way.
+armed=0
+anchor_content="$(cat "$HERE/release-signing/allowed_signers" 2>/dev/null || true)"
+if [[ -n "${anchor_content//[[:space:]]/}" ]]; then
+  armed=1
+  anchor_lines="$(grep -c . "$HERE/release-signing/allowed_signers")"
+  [[ "$anchor_lines" -eq 4 ]] \
+    || fail "release-signing/allowed_signers is armed but has ${anchor_lines} lines, expected exactly 4"
+  echo "shipped allowed_signers is armed with 4 keys OK"
+else
+  echo "shipped allowed_signers is the empty placeholder OK"
+fi
 
 # --- load install.sh's verify functions without running an install ----------
 KAST_INSTALL_SOURCED=1 source "$HERE/install.sh"
@@ -36,9 +48,14 @@ has_signing_key "$td/blank" && fail "whitespace-only file must not count as a pr
 
 has_signing_key "$td/does-not-exist" && fail "a missing file must not count as a provisioned key"
 
-# no-arg form reads the global RELEASE_ALLOWED_SIGNERS, which install.sh
-# ships as '' — already asserted above to still be true on disk.
-has_signing_key && fail "empty RELEASE_ALLOWED_SIGNERS must not count as a provisioned key"
+# no-arg form reads the global RELEASE_ALLOWED_SIGNERS — must agree with
+# whichever shape the anchor actually shipped in (checked above): armed
+# means a real key IS provisioned, unarmed means it isn't.
+if [[ "$armed" -eq 1 ]]; then
+  has_signing_key || fail "an armed RELEASE_ALLOWED_SIGNERS must count as a provisioned key"
+else
+  has_signing_key && fail "empty RELEASE_ALLOWED_SIGNERS must not count as a provisioned key"
+fi
 echo "has_signing_key() OK"
 
 # --- verify_signature(): real roundtrip -------------------------------------
