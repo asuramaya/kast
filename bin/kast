@@ -1582,7 +1582,13 @@ doctor_run() {
     printf '\nDesktop integration\n'
     local ext_dir="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/kast@asuramaya"
     local ext_state=""
-    command -v gnome-extensions >/dev/null 2>&1 && ext_state="$(gnome-extensions info kast@asuramaya 2>/dev/null | sed -n 's/^ *State: *//p')"
+    if command -v gnome-extensions >/dev/null 2>&1; then
+        # `gnome-extensions info` exits non-zero when the extension isn't
+        # currently registered (no session, not yet scanned) — under
+        # set -e/pipefail that would kill doctor outright instead of just
+        # reporting "not installed" below; keep it a soft failure.
+        ext_state="$(gnome-extensions info kast@asuramaya 2>/dev/null | sed -n 's/^ *State: *//p')" || true
+    fi
     if [[ "${ext_state}" == "OUT OF DATE"* ]]; then
         # The shell-version pin in metadata.json is too old for this GNOME — the
         # tile won't load. The graphical picker (kast pick) still works.
