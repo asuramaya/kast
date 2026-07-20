@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -e
+
+case "$1" in
+    remove|purge)
+        # The removal asymmetry: dpkg cleanly removes everything this package
+        # put under /usr, but kast-pill's per-user activation (the GNOME
+        # extension copy, the enabled-extensions gsettings entry) lives in
+        # each account's own $HOME — a root postrm can't reach into another
+        # user's session to undo that, any more than postinst could reach in
+        # to set it up. Say so, once, on the way out.
+        echo "kast removed. Per-user pill copies survive in each account's \$HOME —"
+        echo "run 'kast-pill remove' as each user who ran 'kast-pill install' first"
+        echo "if you want those cleaned up too."
+        ;;
+esac
+
+exit 0

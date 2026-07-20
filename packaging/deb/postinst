@@ -1,0 +1,21 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# kast postinst — deliberately does nothing user-facing. Every receiver is a
+# LAN listener that must stay off by default (docs/SECURITY.md), and this
+# script runs as root during dpkg configure with no reach into any user's
+# session anyway — so "receivers stay off" holds by simple absence of code
+# here, not a guard this script has to remember to apply. No systemctl
+# --user, no gsettings, no gnome-extensions: those are per-account state only
+# the account itself can touch (see kast-pill, kast install-shortcut).
+set -e
+
+if [ "$1" = configure ]; then
+    echo "kast installed. Per-user activation (run as yourself, not root):"
+    echo "    kast-pill install       # GNOME Quick Settings pill"
+    echo "    kast install-shortcut   # optional Super+K shortcut"
+    echo "  Then log out/in once — Wayland can't hot-reload extensions."
+    echo "Receivers (AirPlay/YouTube in) are off by default — turn one on"
+    echo "from the pill, or: kast receiver-start / kast doctor to check deps."
+fi
+
+exit 0

@@ -1,0 +1,9 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# kast has no system-level daemon or unit to stop before removal — every
+# service kast ships is a systemd --user unit, started (or not) per-account,
+# never by this package. Nothing for root to reach here; kept as an explicit
+# no-op for shape parity with the family's maintainer-script trio rather than
+# silently omitting the file.
+set -e
+exit 0

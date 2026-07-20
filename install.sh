@@ -81,8 +81,9 @@ if [[ "${KAST_INSTALL_SOURCED:-0}" == "1" ]]; then
 fi
 
 verify_release_tarball() {
-    # Verify the downloaded release tarball against its published SHA-256
-    # manifest (kast.tar.gz.sha256), then — once a release-signing key is
+    # Verify the downloaded release tarball against its published SHA256SUMS
+    # manifest (one manifest, covering every release artifact — tarball and,
+    # from v0.7.5, the .deb too), then — once a release-signing key is
     # provisioned — that manifest's SSH signature against the embedded trust
     # anchor (docs/RELEASE-SIGNING.md). We refuse rather than fall back to
     # "unverified" here: the release path is supposed to be verifiable, so a
@@ -98,14 +99,15 @@ verify_release_tarball() {
         printf 'sha256sum not found; cannot verify the release download. Install coreutils and retry.\n' >&2
         exit 1
     }
-    sums="${tmp}/kast.tar.gz.sha256"
-    if ! curl -fsSL "${base}/kast.tar.gz.sha256" -o "${sums}"; then
-        printf 'Could not fetch the release checksum (kast.tar.gz.sha256); refusing to install an unverified download.\n' >&2
+    sums="${tmp}/SHA256SUMS"
+    if ! curl -fsSL "${base}/SHA256SUMS" -o "${sums}"; then
+        printf 'Could not fetch the release checksum manifest (SHA256SUMS); refusing to install an unverified download.\n' >&2
         exit 1
     fi
-    want="$(awk '$2 == "kast.tar.gz" { print $1; exit }' "${sums}")"
+    # sha256sum's optional '*' prefix marks binary mode; tolerate either.
+    want="$(awk '$2 == "kast.tar.gz" || $2 == "*kast.tar.gz" { print $1; exit }' "${sums}")"
     if [[ -z "${want}" ]]; then
-        printf 'Release checksum file has no entry for kast.tar.gz; refusing to install an unverified download.\n' >&2
+        printf 'SHA256SUMS has no entry for kast.tar.gz; refusing to install an unverified download.\n' >&2
         exit 1
     fi
     got="$(sha256sum "${tarball}" | awk '{ print $1 }')"
@@ -117,8 +119,8 @@ verify_release_tarball() {
 
     # Signature over that checksum manifest (the exact bytes fetched above),
     # against the embedded trust anchor. Signing the (small) manifest rather
-    # than the tarball directly still covers the tarball transitively, via
-    # the hash check above.
+    # than each artifact directly still covers all of them transitively, via
+    # the hash check above (and the .deb's own check, once one exists).
     if ! has_signing_key; then
         printf 'warning: no release-signing key provisioned yet — proceeding on sha256 alone.\n' >&2
         printf '         See docs/RELEASE-SIGNING.md.\n' >&2
@@ -128,8 +130,8 @@ verify_release_tarball() {
         printf 'ssh-keygen not found; cannot verify the release signature. Aborting.\n' >&2
         exit 1
     }
-    local sig="${tmp}/kast.tar.gz.sha256.sig" signers="${tmp}/allowed_signers"
-    if ! curl -fsSL "${base}/kast.tar.gz.sha256.sig" -o "${sig}"; then
+    local sig="${tmp}/SHA256SUMS.sig" signers="${tmp}/allowed_signers"
+    if ! curl -fsSL "${base}/SHA256SUMS.sig" -o "${sig}"; then
         printf 'Could not fetch the release signature; refusing unsigned install.\n' >&2
         exit 1
     fi

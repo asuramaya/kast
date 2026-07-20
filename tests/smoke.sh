@@ -97,5 +97,31 @@ expect_grep  "set-mode persists"             "video-overlay" "${KAST[@]}" get-mo
 "${KAST[@]}" set-mode mirror >/dev/null 2>&1
 expect_fail  "set-mode rejects bad mode"     "${KAST[@]}" set-mode bogus
 
+# --- make deb: builds a real .deb; contents include the shared/inert files.
+# Builds and inspects only — never installed (that's a human's `dpkg -i`).
+if command -v dpkg-deb >/dev/null 2>&1; then
+    if make -C "${ROOT_DIR}" deb >/tmp/kast-deb-build.log 2>&1; then
+        DEBFILE="${ROOT_DIR}/build/deb/kast_$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION")_all.deb"
+        if [[ -f "${DEBFILE}" ]]; then
+            CONTENTS="$(dpkg-deb --contents "${DEBFILE}")"
+            deb_ok=1
+            for want in usr/bin/kast usr/bin/kast-pill usr/bin/kast-healthcheck usr/bin/kast-update \
+                        usr/lib/systemd/user/uxplay.service usr/lib/systemd/user/kast-update.timer \
+                        usr/share/kast/extension/kast@asuramaya/extension.js \
+                        usr/share/applications/kast-center.desktop \
+                        usr/share/pipewire/pipewire.conf.d/50-raop.conf; do
+                grep -q "${want}" <<<"${CONTENTS}" || { bad "deb missing ${want}"; deb_ok=0; }
+            done
+            [[ "${deb_ok}" -eq 1 ]] && ok "deb built and contents verified (never installed)"
+        else
+            bad "make deb produced no .deb"
+        fi
+    else
+        bad "make deb failed"; cat /tmp/kast-deb-build.log >&2
+    fi
+else
+    printf '  skip deb build (dpkg-deb not found)\n'
+fi
+
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [[ "${fail}" -eq 0 ]]

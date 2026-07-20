@@ -71,6 +71,32 @@ The core install stays lean. The heavier inbound receivers are opt-in:
 Other flags: `--skip-apt` (don't touch apt), `--no-shortcut`, `--shortcut '<Primary>k'`.
 After installing, run `kast doctor` to confirm the stack is healthy.
 
+## `.deb` Install
+
+From v0.7.5, releases also ship a `.deb` — download it from the
+[latest release](https://github.com/asuramaya/kast/releases/latest) and:
+
+```bash
+sudo dpkg -i kast_*.deb
+```
+
+The `.deb` installs shared, inert files under `/usr` only — nothing activates
+automatically, and nothing ever needs root beyond this one `dpkg -i`. As
+yourself, no `sudo`, once per account:
+
+```bash
+kast-pill install          # copy the pill into your account + enable it
+kast install-shortcut      # optional Super+K shortcut
+```
+
+Removal (`sudo dpkg -r kast`) cleans `/usr`, but per-user `kast-pill` copies
+survive in each account's `$HOME` — run `kast-pill remove` per account first
+if you want those gone too.
+
+The `.deb` and the tarball/checkout install are independent: don't mix them
+on one machine. `kast update` detects a `.deb` install and refuses to run the
+tarball installer over it — download the next `.deb` and `dpkg -i` it instead.
+
 ## What The Installer Does
 
 1. Installs the core Ubuntu packages in [packages.txt](packages.txt) (discovery, casting out,
@@ -102,8 +128,11 @@ kast update --apt      # also refresh system (apt) packages for your installed f
 you already have (it detects shairport-sync / the YouTube receiver and keeps them). By default
 it doesn't touch apt (so it needs no `sudo` and works from the tile's one-click "⬆ Update"
 entry); use `--apt` from a terminal to also refresh system packages. The `curl | bash`
-bootstrap verifies the downloaded release tarball against its published `.sha256` before
-extracting (and aborts on mismatch); the `.sha256` is also there for manual verification.
+bootstrap verifies the downloaded release tarball against the published `SHA256SUMS` manifest
+before extracting (and aborts on mismatch), then — once a release-signing key is provisioned —
+that manifest's SSH signature against a trust anchor baked into the installer itself (see
+[docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md)). This path is for the tarball/checkout
+install only; a `.deb` install updates via a new `.deb` (see above), not `kast update`.
 
 ## Uninstall
 
@@ -177,6 +206,8 @@ If you want `Ctrl+K` instead of `Super+K`: `KAST_SHORTCUT='<Primary>k' ./install
 - [bin/kast](bin/kast): runtime CLI; the extension shells out to `kast … --json`
 - [bin/kast-airplay](bin/kast-airplay): Python helper driving `pyatv` (AirPlay out + control)
 - [bin/kast-control-center](bin/kast-control-center): GTK4/Adwaita Control Center window
+- [bin/kast-pill](bin/kast-pill): per-user pill activation for `.deb` installs (`install`/`remove`)
+- [packaging/deb/](packaging/deb): `.deb` maintainer scripts (`make deb` builds it; never installs)
 - [youtube-receiver/](youtube-receiver): the Node DIAL receiver (`yt-cast-receiver` + `mpv`)
 - [shell-extension/kast@asuramaya/](shell-extension/kast@asuramaya): the Quick Settings UI (`extension.js` tile + `prefs.js` dialog)
 - [systemd/user/](systemd/user): the off-by-default receiver services (uxplay / shairport-sync / kast-youtube)

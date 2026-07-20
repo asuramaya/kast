@@ -6,7 +6,7 @@ APP_ID="kast"
 # installed standalone binary (which ships without VERSION beside it) still knows
 # its version. CI asserts the two stay in sync (see .github/workflows/ci.yml and
 # release.yml).
-KAST_VERSION="0.7.4"
+KAST_VERSION="0.7.5"
 REPO_SLUG="asuramaya/kast"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
@@ -1666,6 +1666,17 @@ update_run() {
     if ! version_gt "${latest}" "${KAST_VERSION}"; then
         printf 'kast is already up to date (v%s)\n' "${KAST_VERSION}"
         return 0
+    fi
+
+    # A .deb install (from v0.7.5) is dpkg-owned: re-running install.sh's
+    # tarball path here would write a second, dpkg-untracked copy of every
+    # file on top of it — the same source-vs-package split-brain phanspeed's
+    # updater already guards against. There's no apt repo, so the fix isn't
+    # "apt upgrade" — it's fetching and installing the next .deb by hand.
+    if command -v dpkg-query >/dev/null 2>&1 && dpkg-query -W -f='${Status}' kast 2>/dev/null | grep -q '^install ok installed$'; then
+        die "kast is installed via .deb (dpkg-owned) — 'kast update' won't touch it.
+Download the new kast_*.deb from https://github.com/${REPO_SLUG}/releases/latest
+and install it with: sudo dpkg -i kast_*.deb"
     fi
 
     # Re-run the latest release's installer, preserving the optional features

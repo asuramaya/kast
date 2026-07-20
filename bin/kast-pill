@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# kast-pill — install/remove the GNOME pill for YOUR account. Never needs
+# root: the extension only touches your own $HOME and your own gnome-shell
+# session settings. `sudo dpkg -i kast_*.deb` stages the extension source
+# system-wide (so any account on the box can self-serve); THIS is the
+# per-account step — run it as yourself, no sudo, whenever you want the pill
+# on a given login. Source-checkout users don't need this at all (install.sh
+# already does the per-user copy directly); it exists for the .deb path.
+#
+#   kast-pill install   copy the extension into your home + enable it
+#   kast-pill remove    disable it and delete your copy
+set -euo pipefail
+
+EXT_UUID="kast@asuramaya"
+
+# Resolve the staged extension source: an explicit KAST_EXT_DIR always wins;
+# otherwise try the repo layout (bin/../shell-extension/$EXT_UUID, for
+# `make pill` in a checkout) then the installed (.deb) layout.
+if [[ -n "${KAST_EXT_DIR:-}" ]]; then
+    SRC_EXT="${KAST_EXT_DIR}"
+else
+    _self="$(dirname "$(readlink -f "$0")")"
+    SRC_EXT="/usr/share/kast/extension/${EXT_UUID}"
+    for _c in "${_self}/../shell-extension/${EXT_UUID}" "${_self}/../share/kast/extension/${EXT_UUID}"; do
+        [[ -f "${_c}/metadata.json" ]] && { SRC_EXT="$(cd "${_c}" && pwd)"; break; }
+    done
+fi
+EXT_DIR="${HOME}/.local/share/gnome-shell/extensions/${EXT_UUID}"
+
+if [[ ${EUID} -eq 0 ]]; then
+    printf 'kast-pill: run this as yourself, not root — it only touches your own home.\n' >&2
+    exit 1
+fi
+
+case "${1:-install}" in
+    install)
+        [[ -f "${SRC_EXT}/metadata.json" ]] || {
+            printf 'extension source not found at %s — run "sudo dpkg -i kast_*.deb" (or reinstall kast) first.\n' "${SRC_EXT}" >&2
+            exit 1
+        }
+        mkdir -p "${EXT_DIR}"
+        install -m 0644 "${SRC_EXT}/metadata.json" "${EXT_DIR}/metadata.json"
+        install -m 0644 "${SRC_EXT}/extension.js"  "${EXT_DIR}/extension.js"
+        install -m 0644 "${SRC_EXT}/prefs.js"      "${EXT_DIR}/prefs.js"
+        gnome-extensions enable "${EXT_UUID}" 2>/dev/null || true
+        # `gnome-extensions enable` no-ops if the running shell hasn't scanned a
+        # freshly installed extension, so also write the enabled-extensions list
+        # directly — the shell honors it on the next login (Wayland can't
+        # hot-reload extensions).
+        cur="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || echo '@as []')"
+        if grep -Fq "'${EXT_UUID}'" <<<"${cur}"; then
+            printf 'pill installed and enabled.\n'
+        else
+            if [[ "${cur}" == "@as []" || "${cur}" == "[]" ]]; then
+                cur="['${EXT_UUID}']"
+            else
+                cur="${cur%]}, '${EXT_UUID}']"
+            fi
+            gsettings set org.gnome.shell enabled-extensions "${cur}" 2>/dev/null \
+                && printf 'pill installed — log out/in once to load it (Wayland can'\''t hot-reload extensions).\n' \
+                || printf 'pill installed — enable manually: gnome-extensions enable %s\n' "${EXT_UUID}"
+        fi
+        # Best-effort convenience seed, matching install.sh's tarball path —
+        # never required (bin/kast's load_conf works fine with no conf file).
+        conf="${XDG_CONFIG_HOME:-${HOME}/.config}/kast/uxplay.conf"
+        example="/usr/share/kast/uxplay.conf.example"
+        if [[ ! -f "${conf}" && -f "${example}" ]]; then
+            install -D -m 0644 "${example}" "${conf}"
+        fi
+        ;;
+    remove)
+        gnome-extensions disable "${EXT_UUID}" 2>/dev/null || true
+        rm -rf "${EXT_DIR}"
+        printf 'pill removed from your account.\n'
+        ;;
+    *)
+        printf 'usage: kast-pill <install|remove>\n' >&2
+        exit 1
+        ;;
+esac

@@ -27,3 +27,11 @@ zenity
 #
 # The UI is a GNOME Quick Settings extension (GJS, ships with gnome-shell) —
 # no extra packages needed.
+#
+# The .deb (from v0.7.5, packaging/deb/) is deliberately thinner: Depends:
+# python3 (kast-airplay) + jq (nearly every kast verb pipes through it) only;
+# everything else above is Recommends, same list as this file's core install.
+# No new packages beyond what's already here — see docs/RELEASE-SIGNING.md's
+# ".deb" section and Makefile's `deb` target for the exact split. (Caught by
+# an isolated-container install test: without jq, `kast update` aborts
+# silently under set -e/pipefail before reaching any of its own logic.)

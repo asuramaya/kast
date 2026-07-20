@@ -4,3 +4,6 @@ __pycache__/
 # Node deps for the YouTube receiver (installed on target by install.sh)
 youtube-receiver/node_modules/
 youtube-receiver/.node-persist/
+
+# make deb build output
+build/

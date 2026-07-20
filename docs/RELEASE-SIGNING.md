@@ -1,12 +1,10 @@
 # Release signing
 
-Status: **mechanism built, not yet enforcing.** `release-signing/allowed_signers`
-(and its `install.sh`-embedded twin, `RELEASE_ALLOWED_SIGNERS`) are currently
-empty — no signing key has been provisioned. Until one is: `install.sh`'s
-bootstrap degrades to sha256-only with a printed warning. The moment a real
-key exists in both places and a release ships a matching
-`kast.tar.gz.sha256.sig`, verification becomes mandatory and fail-closed
-automatically — no further code changes needed.
+Status: **armed and enforcing**, as of v0.7.4 — the family's first release to
+ship able to verify itself from birth. `release-signing/allowed_signers` (and
+its `install.sh`-embedded twin, `RELEASE_ALLOWED_SIGNERS`) hold the operator's
+4 canonical FIDO2 pubkeys; `install.sh`'s bootstrap is fail-closed: no
+`SHA256SUMS.sig`, no `ssh-keygen`, or no matching key means no install.
 
 ## Why this exists
 
@@ -80,23 +78,24 @@ unsigned release (see "Verification semantics" below). Until then,
 ## Per-release signing (operator, needs the FIDO2 key attached + a touch)
 
 ```sh
-# Sign the checksum manifest, not the tarball itself — kast.tar.gz.sha256
-# already covers kast.tar.gz via its checksum entry, so signing it
-# transitively covers the whole release, and it's tiny (one line).
+# Sign the checksum manifest, not each artifact — SHA256SUMS covers every
+# release artifact (the tarball, and from v0.7.5 the .deb) via its checksum
+# entries, so signing it transitively covers the whole release, and it's
+# tiny (one line per artifact).
 ssh-keygen -Y sign -f /path/to/id_asuramaya_master_N.pub -n kast-release \
-  kast.tar.gz.sha256
-# -> produces kast.tar.gz.sha256.sig
+  SHA256SUMS
+# -> produces SHA256SUMS.sig
 
-gh release upload vX.Y.Z kast.tar.gz.sha256.sig
+gh release upload vX.Y.Z SHA256SUMS.sig
 ```
 
 ## Verification (client side — already built)
 
 ```sh
-sha256sum -c kast.tar.gz.sha256                          # artifact matches the manifest
+sha256sum -c SHA256SUMS                                   # artifact matches the manifest
 ssh-keygen -Y verify -f release-signing/allowed_signers \
-  -I kast -n kast-release -s kast.tar.gz.sha256.sig \
-  < kast.tar.gz.sha256                                    # manifest carries the operator's hand
+  -I kast -n kast-release -s SHA256SUMS.sig \
+  < SHA256SUMS                                             # manifest carries the operator's hand
 ```
 
 Exit 0 = valid signature from the pinned principal, over exactly those
@@ -106,16 +105,35 @@ checksum bytes. Anything else is a hard failure. `install.sh`'s
 1. Checks whether `RELEASE_ALLOWED_SIGNERS` has any real key line — blank
    means no key has been provisioned yet, and verification degrades to
    sha256-only with a warning (see "One enforcement policy" above).
-2. If a real key is present: requires a `kast.tar.gz.sha256.sig` asset on the
+2. If a real key is present: requires a `SHA256SUMS.sig` asset on the
    release. Missing asset, or a signature that doesn't verify against the
    pinned principal → abort, no install.
 3. Independently, the sha256 in the (now-authenticated) manifest must still
    match the downloaded tarball — the signature covers the manifest, this
    step binds the manifest to the actual bytes being installed.
 
-## Ratified exemption: tarball-only, no `.deb`
+## `.deb` — since v0.7.5
 
-kast is per-user glue (its Makefile refuses to run as root by design, not
-debt), so this signing pass covers the tarball only — a user-level `.deb` is
-a possible later milestone, not a blocker here (`~/code/REPOS/RELEASE.md`,
-ratified 2026-07-19).
+The tarball-only exemption is **revoked** (`~/code/REPOS/RELEASE.md`, ruling
+`0d38a1f9`): the family standard is now tarball + `.deb` + one shared
+`SHA256SUMS`, covering both. `make deb` builds `build/deb/kast_<ver>_all.deb`
+(never installs it — see `tests/smoke.sh`); `release.yml` publishes it
+alongside the tarball, one manifest, one signature.
+
+Shape: the `.deb` installs shared, inert files under `/usr` only — binaries,
+the GNOME extension source, `systemd --user` unit files (in
+`/usr/lib/systemd/user/`, auto-discovered per account with no per-user copy
+needed), the D-Bus session-activation file, the PipeWire RAOP config, the
+desktop entry. `postinst` does nothing user-facing: no `systemctl --user`,
+no `gsettings`, no `gnome-extensions enable` — those need a real user
+session postinst can't reach as root, and it's also exactly how receivers
+stay off by default here: by absence of code, not a guard. Per-user
+activation is `kast-pill install` (mirrors coldspot's `coldspot-pill`) plus
+the existing `kast install-shortcut`. See `docs/../README.md`'s `.deb
+Install` section for the user-facing walkthrough, and `packaging/deb/` for
+the maintainer scripts.
+
+`kast update` refuses to run on a dpkg-owned install (detected via
+`dpkg-query`) rather than writing a second, untracked copy of everything —
+the update path for a `.deb` install is the next `.deb`, `dpkg -i`'d by
+hand.

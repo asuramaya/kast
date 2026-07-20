@@ -28,13 +28,24 @@ jobs:
             exit 1
           fi
 
-      - name: Build release tarball
+      - name: Build .deb (produces build/deb/kast_<ver>_all.deb + SHA256SUMS)
+        run: make deb
+
+      - name: Build release tarball, fold into the same manifest
         run: |
           # .gitattributes export-ignore keeps CI/dev files out of the tarball.
-          git archive --format=tar.gz -o kast.tar.gz HEAD
-          sha256sum kast.tar.gz > kast.tar.gz.sha256
-          echo "--- contents ---"
+          # --prefix=kast/: extraction hygiene doctrine (RELEASE.md) — every
+          # tarball extracts to exactly one named directory, never bare into
+          # the caller's CWD.
+          git archive --format=tar.gz --prefix=kast/ -o kast.tar.gz HEAD
+          debfile="build/deb/kast_$(tr -d '[:space:]' < VERSION)_all.deb"
+          cp "${debfile}" .
+          cp build/deb/SHA256SUMS .
+          sha256sum kast.tar.gz >> SHA256SUMS
+          echo "--- contents (tarball) ---"
           tar -tzf kast.tar.gz
+          echo "--- manifest (one signature covers every artifact it lists) ---"
+          cat SHA256SUMS
 
       # No signing step here, deliberately: kast-update / install.sh trust an
       # SSH signature (ssh-keygen -Y verify) against a key pinned INSIDE the
@@ -45,7 +56,7 @@ jobs:
       # just pushed — that defeats the entire scheme. The release ships
       # UNSIGNED from here; the operator signs the checksum manifest's exact
       # published bytes BY HAND, offline, with the physical FIDO2 key, and runs
-      # `gh release upload <tag> kast.tar.gz.sha256.sig --clobber` after.
+      # `gh release upload <tag> SHA256SUMS.sig --clobber` after.
 
       - name: Create or update GitHub release
         env:
@@ -54,12 +65,12 @@ jobs:
           # Idempotent: if the release was already created by hand (e.g. with
           # release notes written ahead of the tag push), attach/replace the
           # build assets on it instead of failing on "tag already exists".
+          debfile="build/deb/kast_$(tr -d '[:space:]' < VERSION)_all.deb"
+          assets=(kast.tar.gz "$(basename "${debfile}")" SHA256SUMS)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" \
-              kast.tar.gz kast.tar.gz.sha256 --clobber
+            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" \
-              kast.tar.gz kast.tar.gz.sha256 \
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
               --title "kast ${GITHUB_REF_NAME}" \
               --generate-notes
           fi

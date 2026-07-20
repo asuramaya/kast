@@ -3,6 +3,34 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-07-19
+
+Adds a `.deb` (the tarball-only exemption is revoked, `~/code/REPOS/RELEASE.md`
+ruling `0d38a1f9`) and fixes release-tarball extraction hygiene. No behavior
+change for existing tarball/checkout installs.
+
+### Added
+- **`.deb` package** (`make deb`, `packaging/deb/`) — shared, inert files
+  under `/usr` only (bins, the GNOME extension source, `systemd --user` unit
+  files in `/usr/lib/systemd/user/`, D-Bus/PipeWire configs, desktop entry).
+  Nothing activates automatically; `postinst` touches no user session and
+  no receiver, by construction. Published alongside the tarball in
+  `release.yml`, covered by the same signed `SHA256SUMS`.
+- **`bin/kast-pill`** — per-user pill activation for `.deb` installs
+  (`install`/`remove`), mirroring coldspot's `coldspot-pill`.
+- `tests/smoke.sh` builds and inspects the `.deb`'s contents (never installs
+  it).
+
+### Changed
+- **Checksum manifest is now `SHA256SUMS`**, retiring the `kast.tar.gz.sha256`
+  dialect — one manifest covers both the tarball and the `.deb`, matching
+  the rest of the family. Signature asset is `SHA256SUMS.sig`.
+- Release tarball now extracts to a named `kast/` directory
+  (`--prefix=kast/`), not bare into the caller's CWD.
+- `kast update` now refuses to run on a `.deb`-installed (dpkg-owned) system
+  rather than writing a second, dpkg-untracked copy of everything — the
+  update path for a `.deb` install is the next `.deb`, `dpkg -i`'d by hand.
+
 ## [0.7.4] - 2026-07-19
 
 Lands the family's release-signing mechanism (`~/code/REPOS/RELEASE.md`), with
