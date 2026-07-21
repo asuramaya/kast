@@ -8,6 +8,13 @@ pipewire-pulse
 wireplumber
 wpasupplicant
 
+# `ssh-keygen -Y verify`: install.sh's bootstrap release-signature check
+# against release-signing/allowed_signers (docs/RELEASE-SIGNING.md). Absent:
+# verify_release_tarball() already fails closed (refuses to install) rather
+# than crashing — but kast is armed now, so this runs on every real install
+# and update; don't leave it to chance.
+openssh-client
+
 # Outbound display casting
 gnome-network-displays
 
@@ -29,8 +36,10 @@ zenity
 # no extra packages needed.
 #
 # The .deb (from v0.7.5, packaging/deb/) is deliberately thinner: Depends:
-# python3 (kast-airplay) + jq (nearly every kast verb pipes through it) only;
-# everything else above is Recommends, same list as this file's core install.
+# python3 (kast-airplay) + jq (nearly every kast verb pipes through it) +
+# openssh-client (release-signature verify, runs on every install/update now
+# that kast is armed) only; everything else above is Recommends, same list
+# as this file's core install.
 # No new packages beyond what's already here — see docs/RELEASE-SIGNING.md's
 # ".deb" section and Makefile's `deb` target for the exact split. (Caught by
 # an isolated-container install test: without jq, `kast update` aborts

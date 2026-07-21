@@ -82,7 +82,7 @@ deb:
 	  echo "Section: gnome"; \
 	  echo "Priority: optional"; \
 	  echo "Architecture: all"; \
-	  echo "Depends: python3, jq"; \
+	  echo "Depends: python3, jq, openssh-client"; \
 	  echo "Recommends: gnome-shell, uxplay, gnome-network-displays, avahi-utils, zenity, pipewire-pulse, network-manager, wireplumber"; \
 	  echo "Maintainer: asuramaya <asuramaya@users.noreply.github.com>"; \
 	  echo "Homepage: https://github.com/asuramaya/kast"; \
