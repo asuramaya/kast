@@ -106,6 +106,8 @@ if command -v dpkg-deb >/dev/null 2>&1; then
             CONTENTS="$(dpkg-deb --contents "${DEBFILE}")"
             deb_ok=1
             for want in usr/bin/kast usr/bin/kast-pill usr/bin/kast-healthcheck usr/bin/kast-update \
+                        usr/bin/sutra_update.py usr/bin/sutra_update.version \
+                        usr/share/kast/allowed_signers \
                         usr/lib/systemd/user/uxplay.service usr/lib/systemd/user/kast-update.timer \
                         usr/share/kast/extension/kast@asuramaya/extension.js \
                         usr/share/applications/kast-center.desktop \
@@ -122,6 +124,20 @@ if command -v dpkg-deb >/dev/null 2>&1; then
 else
     printf '  skip deb build (dpkg-deb not found)\n'
 fi
+
+# --- source install layout (install.sh) also ships the vendored update spine
+# + signing anchor — the exact bug Werner/tjmax each hit independently: a
+# pill that vendors sutra_update.py but ships it in only ONE install layout
+# crashes on import only on a real user's machine, never in whichever layout
+# CI happens to build. ---
+src_ok=1
+# Single-quoted on purpose: these are the literal install.sh source strings
+# to grep for, not variables to expand here.
+# shellcheck disable=SC2016
+for want in '${BIN_DIR}/sutra_update.py' '${BIN_DIR}/sutra_update.version' '${DATA_HOME}/${APP_ID}/allowed_signers'; do
+    grep -qF "${want}" "${ROOT_DIR}/install.sh" || { bad "install.sh missing ${want}"; src_ok=0; }
+done
+[[ "${src_ok}" -eq 1 ]] && ok "install.sh ships sutra_update.py + allowed_signers (source layout)"
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [[ "${fail}" -eq 0 ]]

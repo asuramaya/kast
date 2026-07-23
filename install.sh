@@ -282,11 +282,24 @@ install_user_files() {
     # next to itself).
     install -D -m 755 "${ROOT_DIR}/bin/kast-airplay" "${BIN_DIR}/kast-airplay"
     install -D -m 755 "${ROOT_DIR}/bin/kast-control-center" "${BIN_DIR}/kast-control-center"
-    # Family CLI parity: kast has no daemon (kast-healthcheck checks the
-    # status.json seam instead) and already has a tag-pinned update path
-    # (kast-update delegates to it). Neither changes any default behavior.
+    # Family CLI parity: kast has no daemon, so kast-healthcheck checks the
+    # status.json seam instead of a control socket.
     install -D -m 755 "${ROOT_DIR}/bin/kast-healthcheck" "${BIN_DIR}/kast-healthcheck"
     install -D -m 755 "${ROOT_DIR}/bin/kast-update" "${BIN_DIR}/kast-update"
+    # kast-update's engine: the family's shared update spine (Wave B
+    # convergence, docs/RELEASE-SIGNING.md), vendored beside it as a plain
+    # sibling import — never hand-edit, re-vendor via sutra's vendor.sh.
+    install -D -m 644 "${ROOT_DIR}/bin/sutra_update.py" "${BIN_DIR}/sutra_update.py"
+    install -D -m 644 "${ROOT_DIR}/bin/sutra_update.version" "${BIN_DIR}/sutra_update.version"
+    if [[ -f "${ROOT_DIR}/bin/sutra_update.commit" ]]; then
+        install -D -m 644 "${ROOT_DIR}/bin/sutra_update.commit" "${BIN_DIR}/sutra_update.commit"
+    fi
+    # A persistent copy of the signing anchor for kast-update to verify
+    # against after install: the embedded RELEASE_ALLOWED_SIGNERS above only
+    # covers the curl-pipe bootstrap itself, and a source-installed kast has
+    # no other standing checkout for kast-update to read release-signing/
+    # allowed_signers from.
+    install -D -m 644 "${ROOT_DIR}/release-signing/allowed_signers" "${DATA_HOME}/${APP_ID}/allowed_signers"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
         install -D -m 644 "${ROOT_DIR}/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi

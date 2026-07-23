@@ -3,6 +3,52 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-23
+
+Converges `kast update`'s trust chain onto the family's shared update spine
+(`sutra_update.py`, UNIFY.md Wave B — operator-ruled, decision f4dc3483). No
+change to install.sh's own bootstrap verify, which stays exactly as it is:
+it's the trust root that verifies the very download that delivers this
+vendored Python on a fresh `curl | bash`, and can't converge onto itself.
+
+### Changed
+- **`kast update` / `kast-update` now run through `sutra_update.py`**
+  (vendored into `bin/`, both the tarball and `.deb` layouts) instead of
+  kast's own bespoke shell reimplementation. `bin/kast-update` is now a thin
+  Python wrapper; `update_run()` in `bin/kast` delegates to it. The CLI
+  surface is unchanged (`kast update [--check] [--json] [--apt]`, `kast
+  check-update [--json]`), including the `--skip-apt`-by-default /
+  feature-preserving behavior on a source-install update, and the
+  Quick-Settings-tile JSON contract (`{current, latest, update_available}`)
+  — kast's own layer translates the spine's `{available}` field so
+  `extension.js` needed no change.
+- A `.deb`-owned install refuses an unprivileged `kast update` with the same
+  guidance as before (`sudo dpkg -i kast_*.deb`); `dpkg -i` needs root, and
+  kast has no privileged component to run it from.
+
+### Added
+- **`bin/sutra_update.py`** vendored (+ `.version`/`.commit` integrity and
+  freshness anchors) — the only sutra module kast imports; no daemon, so
+  `sutra.py`/`sutra_xen.py` are deliberately not shipped (ship-what-you-import).
+- **`release-signing/allowed_signers`** now shipped as a persistent runtime
+  file (`/usr/share/kast/allowed_signers` in the `.deb`, `~/.local/share/kast/
+  allowed_signers` for a source install) so `kast-update` has a standing
+  anchor to verify against — previously this file only existed embedded in
+  `install.sh` for the bootstrap, or in a checkout.
+- **`make check-sutra`** — drift guard for the vendored `sutra_update.py`:
+  integrity (sha256 vs `.version`) is a hard gate; freshness is the three-way
+  LAG/DRIFT read (sutra decision d51e090f) against the canonical checkout
+  when present. Wired into `make smoke` and CI.
+- **`make check`** — canonical family grammar (`smoke attack check deb`):
+  the CI lint job's static checks, runnable locally in one shot.
+- **`make attack`** — a recorded exemption, not a silent gap: kast has no
+  daemon or socket to fuzz.
+- Two fixes already committed past v0.7.5 ride this release: `kast doctor`
+  no longer crashes when the GNOME extension isn't currently registered
+  (`gnome-extensions info` validly returns non-zero then), and the `.deb`
+  now declares `openssh-client` (`ssh-keygen -Y verify` runs on every
+  install/update now that kast is armed).
+
 ## [0.7.5] - 2026-07-19
 
 Adds a `.deb` (the tarball-only exemption is revoked, `~/code/REPOS/RELEASE.md`

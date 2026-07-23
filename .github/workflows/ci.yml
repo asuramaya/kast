@@ -25,10 +25,13 @@ jobs:
           fi
 
       - name: ShellCheck
-        run: shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck bin/kast-update tools/sync-signers.sh tests/smoke.sh tests/test_signing.sh
+        run: shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck tools/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 
       - name: Python helpers (syntax)
-        run: python3 -m py_compile bin/kast-airplay bin/kast-control-center
+        run: python3 -m py_compile bin/kast-airplay bin/kast-control-center bin/kast-update bin/sutra_update.py
+
+      - name: Sutra vendor drift guard
+        run: make check-sutra
 
       - name: Shell extension (syntax)
         run: |

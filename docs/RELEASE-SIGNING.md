@@ -38,10 +38,13 @@ Coldspot and phanspeed split their policy: a human-typed `sudo curl|bash`
 bootstrap degrades to sha256-only, while their unattended daily root updater
 refuses outright with no key. **kast has no unattended install path at all**
 — `kast update` (whether from the tile's Update button or the CLI) is always
-an explicit, human-triggered action, same as a fresh install, and both funnel
-through the exact same `install.sh` bootstrap. So kast gets one policy for
-both: degrade to sha256-only with a warning while unarmed, fail-closed once a
-key is provisioned. See `verify_release_tarball()` in `install.sh`.
+an explicit, human-triggered action, same as a fresh install. So kast gets
+one policy for both: degrade to sha256-only with a warning while unarmed,
+fail-closed once a key is provisioned — the same algorithm (sha256 manifest
+check, then `ssh-keygen -Y verify` of the manifest signature against the
+pinned anchor), just two implementations of it: `verify_release_tarball()`
+in `install.sh` for a fresh bootstrap, and `sutra_update.py`'s `verify_dir()`
+for `kast update` (see "Update-path convergence" below).
 
 ## Identity vs role — principal is WHO, namespace is WHAT-FOR
 
@@ -133,7 +136,52 @@ the existing `kast install-shortcut`. See `docs/../README.md`'s `.deb
 Install` section for the user-facing walkthrough, and `packaging/deb/` for
 the maintainer scripts.
 
-`kast update` refuses to run on a dpkg-owned install (detected via
-`dpkg-query`) rather than writing a second, untracked copy of everything —
-the update path for a `.deb` install is the next `.deb`, `dpkg -i`'d by
+`kast update` refuses to run unprivileged on a dpkg-owned install (detected
+via `dpkg-query`) rather than writing a second, untracked copy of everything
+— the update path for a `.deb` install is the next `.deb`, `dpkg -i`'d by
 hand.
+
+## Update-path convergence — since v0.8.0
+
+Before v0.8.0, `kast update` re-fetched `install.sh` pinned to the release
+tag and ran it — a fresh bootstrap in miniature, verified by the same shell
+`verify_release_tarball()` above. That worked, but it meant a fix to the
+family's shared update trust chain never reached kast: every other pill's
+`<pill>-update` is a thin wrapper over the vendored `sutra_update.py` (the
+family's shared update spine, `~/code/REPOS/sutra`), and kast's was a
+one-off shell reimplementation instead (UNIFY.md Wave B convergence,
+operator-ruled, decision `f4dc3483`).
+
+`bin/kast-update` is now that thin wrapper. `kast update` (`update_run()` in
+`bin/kast`) delegates to it instead of re-running `install.sh`. The trust
+chain itself is unchanged in substance — sha256 manifest check, then
+`ssh-keygen -Y verify` against the pinned anchor, degrade-while-unarmed /
+fail-closed-once-armed — just executed by `sutra_update.py`'s `verify_dir()`
+in Python instead of shell. That needed a real, standing `allowed_signers`
+file for `kast-update` to point `-f` at (the embedded `RELEASE_ALLOWED_SIGNERS`
+in `install.sh` only ever covers that one file, fetched alone over a
+curl-pipe bootstrap): `install.sh` now also installs a persistent copy —
+`/usr/share/kast/allowed_signers` in the `.deb`, `~/.local/share/kast/
+allowed_signers` for a source install.
+
+**`install.sh`'s own bootstrap verify is untouched, and stays untouched.**
+It is the trust root that verifies the very release download that delivers
+this vendored Python in the first place — on a fresh `curl | bash` there is
+no `sutra_update.py` yet to delegate to. Chicken-and-egg, unconvergeable by
+construction, same as every other pill's bootstrap.
+
+kast is user-scope with no privileged component, so the one case
+`sutra_update.py`'s generic engine doesn't fit — driving `install.sh` with
+kast's own flags (`--skip-apt` by default, preserving already-installed
+optional receivers) on a source-install update — is handled by kast's own
+thin layer calling the spine's `verify_dir()`/`latest_release()` directly,
+then running the verified tarball's `install.sh` itself. The `.deb` path is
+unchanged: `sutra_update.py`'s own `dpkg -i` covers it exactly, refused
+unprivileged with the guidance above.
+
+`bin/sutra_update.py` (+ `.version`/`.commit` anchors) is vendored, never
+hand-edited — `make check-sutra` is the drift guard (integrity always;
+freshness as a three-way LAG/DRIFT read against the canonical checkout when
+present, sutra decision `d51e090f`), wired into `make smoke` and CI. kast
+vendors only `sutra_update.py` — no daemon, so `sutra.py`/`sutra_xen.py`
+would be dead code (ship-what-you-import).

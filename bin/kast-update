@@ -1,21 +1,180 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 asuramaya and kast contributors
-# kast-update — CLI parity with the family (bin/<tool>-update in every
-# sibling). kast already has a fail-closed-ish, tag-pinned check/install
-# path in `kast update` / `kast check-update` (see update_run() in
-# bin/kast: it fetches install.sh pinned to the release tag, never main).
-# Rather than duplicate that logic here, this delegates to it outright.
-#
-#   kast-update --check          human-readable: newer release or not
-#   kast-update --check --json   {"current","latest","update_available"}
-#   kast-update                  install (same as `kast update`)
-#
-# Installed by install.sh alongside an opt-in (NOT enabled) systemd user
-# timer — family privacy ruling 2026-07-14: updates are click-to-install,
-# never unattended. kast's tile already checks for updates in-process every
-# 6h; this timer, if a user enables it, is purely CLI/notification parity.
-set -uo pipefail
+"""kast-update — pull newer kast releases from GitHub and install them.
 
-KAST_LIBDIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "$0")")" && pwd)"
-exec "${KAST_LIBDIR}/kast" update "$@"
+Thin wrapper over the vendored sutra_update.py (the family's shared update
+spine — UNIFY.md Wave B convergence): one trust chain, one install-path
+detection, instead of kast's former bespoke shell reimplementation (bin/kast's
+update_run() re-fetching install.sh at the pinned tag and relying on its
+shell-side verify_release_tarball). install.sh's own bootstrap verify
+(verify_release_tarball + the embedded RELEASE_ALLOWED_SIGNERS anchor) is
+untouched by design: it is the trust root that verifies the very download
+that delivers this vendored Python on a fresh curl|bash, and can't converge
+onto itself (chicken-and-egg).
+
+  kast-update --check [--json]   notify tier (default): report only
+  kast-update                    manual install tier (explicit consent —
+                                  this is what `kast update` runs)
+  kast-update --auto             timer tier — inert here; kast has no
+                                  auto_update config toggle (installs stay
+                                  click-to-run, never unattended, family
+                                  privacy ruling 2026-07-14)
+
+One kast-specific wrinkle the spine's generic do_install() doesn't cover: a
+source install is unprivileged and self-updating, and today defaults to
+--skip-apt (packages.txt is already satisfied on any machine that already has
+kast) while preserving whichever optional receivers (--with-airplay-audio /
+--with-youtube) are already present, rather than silently dropping them on
+every update. So the source-install path below reuses the spine's own verify
+(fetch, hash, signature — the actual convergence: no more shell-side crypto)
+but drives the final install.sh invocation itself, with those flags. The
+.deb path is unchanged: sutra_update.main()'s dpkg -i covers it exactly, and
+kast has no privileged component to run it from, so that case is refused
+with the same guidance kast already gave before this convergence.
+"""
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sutra_update  # noqa: E402
+
+PILL = "kast"
+REPO_SLUG = "asuramaya/kast"
+_SELF_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.dirname(_SELF_DIR)
+DATA_HOME = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+ANCHOR_CANDIDATES = (
+    "/usr/share/kast/allowed_signers",              # .deb layout
+    os.path.join(DATA_HOME, "kast", "allowed_signers"),  # source install (persistent copy)
+    os.path.join(_SRC_DIR, "release-signing", "allowed_signers"),  # run from a checkout
+)
+
+
+def deb_version():
+    """The dpkg-registered package version, or None if not a .deb install."""
+    try:
+        out = subprocess.check_output(
+            ["dpkg-query", "-W", "-f=${Version}", PILL], stderr=subprocess.DEVNULL)
+        return out.decode().strip() or None
+    except Exception:
+        return None
+
+
+def installed_version():
+    """dpkg first; else parse KAST_VERSION out of the sibling kast script. A
+    source/tarball install writes no separate VERSION file, and this stays
+    exactly in sync with the CI-enforced VERSION<->KAST_VERSION invariant."""
+    v = deb_version()
+    if v:
+        return v
+    try:
+        with open(os.path.join(_SELF_DIR, "kast")) as f:
+            for line in f:
+                if line.startswith("KAST_VERSION="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+
+def source_install_flags(argv):
+    """Preserve kast update's existing behavior: skip apt (already satisfied
+    on any machine that already has kast) unless --apt was passed, and keep
+    whichever optional receivers are already installed rather than dropping
+    them on every update."""
+    flags = [] if "--apt" in argv else ["--skip-apt"]
+    if shutil.which("shairport-sync"):
+        flags.append("--with-airplay-audio")
+    yt = os.path.join(DATA_HOME, "kast", "youtube-receiver", "index.mjs")
+    if os.path.exists(yt) and shutil.which("mpv"):
+        flags.append("--with-youtube")
+    return flags
+
+
+def do_source_install(rel, anchor, is_armed, argv):
+    """Verify through the spine's own verify_dir (hashlib + ssh-keygen -Y
+    verify — the shared crypto this convergence exists for), then run the
+    verified tarball's own install.sh with kast's flags. Mirrors
+    sutra_update.do_install's source branch, minus its flag-less bash call."""
+    assets = rel["assets"]
+    manifest = sutra_update.find_manifest(assets)
+    if not manifest:
+        return False, "release has no manifest"
+    sig = manifest + ".sig" if (manifest + ".sig") in assets else None
+    payload = next((n for n in assets if n.endswith(".tar.gz")), None)
+    if not payload:
+        return False, "release ships no tarball"
+
+    tmp = tempfile.mkdtemp(prefix="kast-update-")
+    try:
+        for name in filter(None, [payload, manifest, sig]):
+            sutra_update._fetch(assets[name], os.path.join(tmp, name))
+        ok, reason = sutra_update.verify_dir(tmp, manifest, sig, anchor, PILL, is_armed)
+        if not ok:
+            return False, reason
+        print(f"verified: {reason}")
+        r = subprocess.run(["tar", "-xzf", os.path.join(tmp, payload), "-C", tmp])
+        if r.returncode != 0:
+            return False, "extract failed"
+        inner = None
+        for root, _dirs, files in os.walk(tmp):
+            if "install.sh" in files and root.count(os.sep) - tmp.count(os.sep) <= 2:
+                inner = os.path.join(root, "install.sh")
+                break
+        if not inner:
+            return False, "no install.sh in verified tarball"
+        r = subprocess.run(["bash", inner] + source_install_flags(argv))
+        return (r.returncode == 0,
+                "install.sh " + ("ok" if r.returncode == 0 else "failed"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    cur = installed_version()
+    if cur is None:
+        print("kast not detected; nothing to update.")
+        sys.exit(0)
+
+    argv = sys.argv[1:]
+    is_deb = deb_version() is not None
+
+    if "--check" in argv or "--json" in argv or "--auto" in argv:
+        # Report-only and timer tiers never touch install.sh's flags, so the
+        # generic spine engine covers deb and source installs identically.
+        sys.exit(sutra_update.main(
+            pill=PILL, slug=REPO_SLUG, installed_version=cur,
+            anchor_candidates=list(ANCHOR_CANDIDATES), auto_enabled=False, argv=argv))
+
+    if is_deb:
+        if os.geteuid() != 0:
+            print("kast is installed via .deb (dpkg-owned) — kast-update won't touch it "
+                  "unprivileged.\nDownload the new kast_*.deb from "
+                  f"https://github.com/{REPO_SLUG}/releases/latest and install it with: "
+                  "sudo dpkg -i kast_*.deb", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(sutra_update.main(
+            pill=PILL, slug=REPO_SLUG, installed_version=cur,
+            anchor_candidates=list(ANCHOR_CANDIDATES), auto_enabled=False, argv=argv))
+
+    anchor = sutra_update.anchor_path(list(ANCHOR_CANDIDATES))
+    is_armed = sutra_update.armed(anchor)
+    rel = sutra_update.latest_release(REPO_SLUG)
+    if rel is None:
+        print("update check failed (network/API)", file=sys.stderr)
+        sys.exit(1)
+    latest = rel["tag"].lstrip("v")
+    if not (latest and sutra_update.newer(latest, cur)):
+        print(f"kast {cur} is current (latest: {latest})")
+        sys.exit(0)
+    print(f"update available: {cur} -> {latest}")
+    print("installing via source path ...")
+    ok, detail = do_source_install(rel, anchor, is_armed, argv)
+    print(detail if ok else f"ERROR: {detail}", file=None if ok else sys.stderr)
+    if ok:
+        sutra_update.notify(PILL, "kast updated", f"{cur} -> {latest}")
+    sys.exit(0 if ok else 1)

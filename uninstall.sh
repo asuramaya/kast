@@ -71,7 +71,10 @@ PY
 
 remove_files() {
     rm -f "${BIN_DIR}/kast" "${BIN_DIR}/kast-tray" \
-          "${BIN_DIR}/kast-airplay" "${BIN_DIR}/kast-control-center"
+          "${BIN_DIR}/kast-airplay" "${BIN_DIR}/kast-control-center" \
+          "${BIN_DIR}/kast-healthcheck" "${BIN_DIR}/kast-update" \
+          "${BIN_DIR}/sutra_update.py" "${BIN_DIR}/sutra_update.version" \
+          "${BIN_DIR}/sutra_update.commit"
     rm -f "${BIN_DIR}/ctrlk-cast" "${BIN_DIR}/ctrlk-cast-tray"
     rm -f "${CONFIG_HOME}/systemd/user/kast-tray.service" \
           "${CONFIG_HOME}/systemd/user/uxplay.service" \

@@ -124,15 +124,14 @@ kast update            # update in place from the latest GitHub release
 kast update --apt      # also refresh system (apt) packages for your installed features
 ```
 
-`kast update` re-runs the installer for the latest release, preserving the optional features
-you already have (it detects shairport-sync / the YouTube receiver and keeps them). By default
-it doesn't touch apt (so it needs no `sudo` and works from the tile's one-click "⬆ Update"
-entry); use `--apt` from a terminal to also refresh system packages. The `curl | bash`
-bootstrap verifies the downloaded release tarball against the published `SHA256SUMS` manifest
-before extracting (and aborts on mismatch), then — once a release-signing key is provisioned —
-that manifest's SSH signature against a trust anchor baked into the installer itself (see
-[docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md)). This path is for the tarball/checkout
-install only; a `.deb` install updates via a new `.deb` (see above), not `kast update`.
+`kast update` verifies the latest release (checksum, then — once a release-signing key is
+provisioned — its SSH signature, same trust chain as a fresh install: see
+[docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md)) and re-runs the installer, preserving
+the optional features you already have (it detects shairport-sync / the YouTube receiver and
+keeps them). By default it doesn't touch apt (so it needs no `sudo` and works from the tile's
+one-click "⬆ Update" entry); use `--apt` from a terminal to also refresh system packages. This
+path is for the tarball/checkout install only; a `.deb` install updates via a new `.deb` (see
+above), not `kast update`.
 
 ## Uninstall
 
@@ -207,6 +206,9 @@ If you want `Ctrl+K` instead of `Super+K`: `KAST_SHORTCUT='<Primary>k' ./install
 - [bin/kast-airplay](bin/kast-airplay): Python helper driving `pyatv` (AirPlay out + control)
 - [bin/kast-control-center](bin/kast-control-center): GTK4/Adwaita Control Center window
 - [bin/kast-pill](bin/kast-pill): per-user pill activation for `.deb` installs (`install`/`remove`)
+- [bin/kast-update](bin/kast-update): `kast update`'s engine — thin wrapper over the vendored
+  [bin/sutra_update.py](bin/sutra_update.py), the family's shared update spine
+  (see [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md))
 - [packaging/deb/](packaging/deb): `.deb` maintainer scripts (`make deb` builds it; never installs)
 - [youtube-receiver/](youtube-receiver): the Node DIAL receiver (`yt-cast-receiver` + `mpv`)
 - [shell-extension/kast@asuramaya/](shell-extension/kast@asuramaya): the Quick Settings UI (`extension.js` tile + `prefs.js` dialog)
@@ -250,11 +252,13 @@ routing, and desktop integration, and prints a fix hint for each problem.
   as text (avahi escapes are decoded but control bytes are refused).
 - `~/.config/kast/uxplay.conf` is sourced by the CLI (like a shell rc file); the preferences
   dialog escapes everything it writes there.
-- `install.sh` and `kast update` fetch over HTTPS from GitHub; the `curl | bash` bootstrap
-  verifies the release tarball against its published `.sha256` before extracting and aborts on a
-  mismatch (the unreviewed main-branch fallback is inherently unverifiable and warns loudly —
-  refuse it with `KAST_NO_UNSTABLE=1`). yt-dlp downloads are SHA-256 verified too. The pipx
-  helpers are isolated per-tool.
+- `install.sh` and `kast update` fetch over HTTPS from GitHub; both verify the release against
+  its published `SHA256SUMS` manifest before extracting/installing and abort on a mismatch (the
+  unreviewed main-branch fallback, install.sh-only, is inherently unverifiable and warns loudly —
+  refuse it with `KAST_NO_UNSTABLE=1`), then — once a release-signing key is provisioned — that
+  manifest's SSH signature against the pinned anchor (see
+  [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md)). yt-dlp downloads are SHA-256 verified too.
+  The pipx helpers are isolated per-tool.
 
 Found a vulnerability? Please report it privately via the repository's **Security** tab —
 details in [SECURITY.md](SECURITY.md).

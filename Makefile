@@ -1,13 +1,70 @@
 # kast — the cast demon
-.PHONY: smoke install uninstall pill sync-signers deb
+.PHONY: smoke install uninstall pill sync-signers deb check-sutra check attack
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 DEBROOT := build/deb/kast_$(VERSION)_all
 DEBFILE := build/deb/kast_$(VERSION)_all.deb
 
-smoke:
+smoke: check-sutra
 	bash tests/smoke.sh
 	bash tests/test_signing.sh
+
+# Drift guard for the vendored sutra_update.py copy (UNIFY.md Wave B
+# convergence, docs/RELEASE-SIGNING.md). Integrity (hash matches what
+# vendor.sh recorded — the copy wasn't hand-edited) is the hard gate,
+# always enforced. Freshness is a THREE-WAY read (sutra's 0.7.0 ruling,
+# decision d51e090f — a plain HEAD-compare reddened on ordinary LAG, an
+# honest vendor from an earlier canonical commit, indistinguishable from
+# real DRIFT, a hand-edited or corrupted copy): no .commit anchor ->
+# freshness unknown (an older vendor, harmless); recorded commit == canonical
+# HEAD -> freshness ok; recorded commit is an ancestor of HEAD -> LAG, warn
+# and exit 0; otherwise -> DRIFT, hard fail. Freshness only runs when the
+# canonical sutra checkout is present, which it normally isn't in CI.
+check-sutra:
+	@ver=$$(cut -d' ' -f1 bin/sutra_update.version); \
+	sha=$$(awk '{print $$NF}' bin/sutra_update.version); \
+	actual=$$(sha256sum bin/sutra_update.py | cut -d' ' -f1); \
+	if [ "$$sha" != "$$actual" ]; then \
+	    echo "check-sutra FAIL: bin/sutra_update.py doesn't match bin/sutra_update.version" \
+	         "(hand-edited? re-vendor: bash ~/code/REPOS/sutra/vendor.sh bin, then keep only sutra_update.*)"; \
+	    exit 1; \
+	fi; \
+	echo "check-sutra: integrity ok (sutra_update $$ver, sha256 $$sha)"; \
+	canon="$$HOME/code/REPOS/sutra"; \
+	if [ -d "$$canon/.git" ]; then \
+	    if [ ! -f bin/sutra_update.commit ]; then \
+	        echo "check-sutra: freshness unknown (no .commit anchor, an older vendor)"; \
+	    else \
+	        recorded=$$(cat bin/sutra_update.commit); \
+	        head=$$(git -C "$$canon" rev-parse HEAD); \
+	        if [ "$$recorded" = "$$head" ]; then \
+	            echo "check-sutra: freshness ok (matches canonical HEAD $$head)"; \
+	        elif git -C "$$canon" merge-base --is-ancestor "$$recorded" HEAD 2>/dev/null; then \
+	            echo "check-sutra: LAG (vendored from $$recorded, canonical has since moved to $$head) -- warn, not a failure"; \
+	        else \
+	            echo "check-sutra FAIL: DRIFT (vendored commit $$recorded is not in canonical's history at $$canon) -- re-vendor"; \
+	            exit 1; \
+	        fi; \
+	    fi; \
+	else \
+	    echo "check-sutra: canonical sutra checkout not present, freshness skipped"; \
+	fi
+
+# Canonical family grammar (`smoke attack check deb`): the same static checks
+# as CI's lint job, runnable locally in one shot.
+check: check-sutra
+	shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck tools/sync-signers.sh tests/smoke.sh tests/test_signing.sh
+	python3 -m py_compile bin/kast-airplay bin/kast-control-center bin/kast-update bin/sutra_update.py
+	node --check "shell-extension/kast@asuramaya/extension.js" "shell-extension/kast@asuramaya/prefs.js"
+	python3 -c "import json; json.load(open('shell-extension/kast@asuramaya/metadata.json'))"
+	@echo "all static checks passed"
+
+# kast is glue with no daemon and no socket to fuzz (canonical family
+# grammar is `smoke attack check deb`; UNIFY.md's attack row). This is a
+# recorded exemption, not a silent gap: the target exists on purpose to say
+# so, rather than a missing verb the grammar would otherwise imply.
+attack:
+	@echo "attack: exempt -- kast has no daemon/socket surface to fuzz (see this Makefile comment)"
 
 # rebuild release-signing/allowed_signers from the canonical keys (see
 # docs/RELEASE-SIGNING.md — do NOT run casually; see the sequencing rule there)
@@ -58,7 +115,15 @@ deb:
 	install -d -m 0755 $(DEBROOT)/usr/lib/systemd/user
 	install -m 0755 bin/kast bin/kast-airplay bin/kast-control-center \
 	    bin/kast-healthcheck bin/kast-update bin/kast-pill $(DEBROOT)/usr/bin/
+	# kast-update's engine: the family's shared update spine (Wave B
+	# convergence, docs/RELEASE-SIGNING.md) — same sibling-import layout as
+	# the source install, never hand-edited, re-vendored via sutra's vendor.sh.
+	install -m 0644 bin/sutra_update.py bin/sutra_update.version $(DEBROOT)/usr/bin/
+	if [ -f bin/sutra_update.commit ]; then \
+	    install -m 0644 bin/sutra_update.commit $(DEBROOT)/usr/bin/; \
+	fi
 	install -m 0644 VERSION $(DEBROOT)/usr/share/kast/VERSION
+	install -m 0644 release-signing/allowed_signers $(DEBROOT)/usr/share/kast/allowed_signers
 	install -m 0644 config/uxplay.conf.example $(DEBROOT)/usr/share/kast/uxplay.conf.example
 	install -m 0644 shell-extension/kast@asuramaya/extension.js \
 	    shell-extension/kast@asuramaya/prefs.js \

@@ -6,8 +6,7 @@ APP_ID="kast"
 # installed standalone binary (which ships without VERSION beside it) still knows
 # its version. CI asserts the two stay in sync (see .github/workflows/ci.yml and
 # release.yml).
-KAST_VERSION="0.7.5"
-REPO_SLUG="asuramaya/kast"
+KAST_VERSION="0.8.0"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -1612,100 +1611,39 @@ doctor_run() {
     [[ "${DOCTOR_FAIL}" -eq 0 ]]
 }
 
-latest_release_version() {
-    need curl
-    curl -fsSL "https://api.github.com/repos/${REPO_SLUG}/releases/latest" 2>/dev/null \
-        | jq -r '.tag_name // empty' 2>/dev/null | sed 's/^v//'
-}
-
-version_gt() {
-    # True only when $1 is a strictly newer version than $2.
-    [[ "$1" != "$2" ]] && [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" == "$1" ]]
-}
-
-check_update_json() {
-    need jq
-    local latest avail
-    latest="$(latest_release_version)"
-    if [[ -n "${latest}" ]] && version_gt "${latest}" "${KAST_VERSION}"; then
-        avail=true
+# `kast update`/`kast check-update` delegate to kast-update (a thin Python
+# wrapper over the vendored sutra_update.py, the family's shared update
+# spine — Wave B convergence). This bash layer no longer re-implements the
+# checksum/signature trust chain itself; it only translates kast-update's
+# --json shape ({current,latest,available,armed}) into the CLI contract the
+# Quick Settings tile (extension.js) already expects ({current,latest,
+# update_available}), so that consumer doesn't need to change.
+update_check_run() {
+    local json="$1"
+    if [[ -n "${json}" ]]; then
+        need jq
+        "${KAST_LIBDIR}/kast-update" --check --json | jq '{current, latest, update_available: .available}'
     else
-        avail=false
-    fi
-    jq -n --arg current "${KAST_VERSION}" --arg latest "${latest}" --argjson avail "${avail}" \
-        '{current: $current, latest: (if $latest == "" then null else $latest end), update_available: $avail}'
-}
-
-check_update_text() {
-    local json avail latest
-    json="$(check_update_json)"
-    avail="$(jq -r '.update_available' <<<"${json}")"
-    latest="$(jq -r '.latest // "unknown"' <<<"${json}")"
-    if [[ "${avail}" == "true" ]]; then
-        printf 'Update available: v%s -> v%s   (run: kast update)\n' "${KAST_VERSION}" "${latest}"
-    else
-        printf 'kast is up to date (v%s; latest v%s)\n' "${KAST_VERSION}" "${latest}"
+        "${KAST_LIBDIR}/kast-update" --check
     fi
 }
 
 update_run() {
     # `kast update --check[=--json]` reports current-vs-latest without installing
     # (the canonical cross-tool flag); it's an alias for `kast check-update`.
-    local want_apt="" want_check="" check_json=""
+    local want_check="" check_json=""
     for _a in "$@"; do
         case "${_a}" in
-            --apt)        want_apt=1 ;;
             --check)      want_check=1 ;;
             --check-json) want_check=1; check_json=1 ;;
             --json)       check_json=1 ;;
         esac
     done
     if [[ -n "${want_check}" ]]; then
-        if [[ -n "${check_json}" ]]; then check_update_json; else check_update_text; fi
+        update_check_run "${check_json}"
         return $?
     fi
-
-    need curl
-    local latest
-    latest="$(latest_release_version)"
-    [[ -n "${latest}" ]] || die "Could not reach GitHub to check for updates"
-    if ! version_gt "${latest}" "${KAST_VERSION}"; then
-        printf 'kast is already up to date (v%s)\n' "${KAST_VERSION}"
-        return 0
-    fi
-
-    # A .deb install (from v0.7.5) is dpkg-owned: re-running install.sh's
-    # tarball path here would write a second, dpkg-untracked copy of every
-    # file on top of it — the same source-vs-package split-brain phanspeed's
-    # updater already guards against. There's no apt repo, so the fix isn't
-    # "apt upgrade" — it's fetching and installing the next .deb by hand.
-    if command -v dpkg-query >/dev/null 2>&1 && dpkg-query -W -f='${Status}' kast 2>/dev/null | grep -q '^install ok installed$'; then
-        die "kast is installed via .deb (dpkg-owned) — 'kast update' won't touch it.
-Download the new kast_*.deb from https://github.com/${REPO_SLUG}/releases/latest
-and install it with: sudo dpkg -i kast_*.deb"
-    fi
-
-    # Re-run the latest release's installer, preserving the optional features
-    # already present so an update never silently drops one.
-    local flags=()
-    if command -v shairport-sync >/dev/null 2>&1; then
-        flags+=(--with-airplay-audio)
-    fi
-    if [[ -f "${DATA_HOME}/${APP_ID}/youtube-receiver/index.mjs" ]] && command -v mpv >/dev/null 2>&1; then
-        flags+=(--with-youtube)
-    fi
-    # apt needs sudo, so only touch it when explicitly asked (kast update --apt).
-    # The default refreshes files + the pipx/Node helpers without a sudo prompt,
-    # which is also what the tile's one-click update relies on.
-    if [[ -z "${want_apt}" ]]; then
-        flags+=(--skip-apt)
-    fi
-
-    printf 'Updating kast v%s -> v%s ...\n' "${KAST_VERSION}" "${latest}"
-    # Fetch the bootstrapper pinned to the release tag being installed (not the
-    # mutable main branch); it then downloads and checksum-verifies that tag's
-    # tarball, so `kast update` never executes unreviewed main-branch code.
-    curl -fsSL "https://raw.githubusercontent.com/${REPO_SLUG}/v${latest}/install.sh" | bash -s -- "${flags[@]}"
+    exec "${KAST_LIBDIR}/kast-update" "$@"
 }
 
 usage() {
@@ -1957,7 +1895,7 @@ case "${cmd}" in
         repair_run
         ;;
     check-update)
-        if [[ "${1:-}" == "--json" ]]; then check_update_json; else check_update_text; fi
+        update_check_run "$([[ "${1:-}" == "--json" ]] && echo 1)"
         ;;
     update)
         update_run "$@"
