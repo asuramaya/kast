@@ -70,7 +70,19 @@ jobs:
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
           else
+            # Notes come from CHANGELOG.md, never --generate-notes: a human
+            # wrote that entry, and a commit dump is not release notes. If the
+            # section is missing, refuse the release instead of falling back,
+            # so a forgotten CHANGELOG entry is loud rather than silent.
+            ver="${GITHUB_REF_NAME#v}"
+            awk -v v="${ver}" 'BEGIN{f=0}
+              /^## / { if (f) exit; if (index($0, v)) { f=1; print; next } }
+              f { print }' CHANGELOG.md > RELEASE_NOTES.md
+            if [ ! -s RELEASE_NOTES.md ]; then
+              echo "::error::no CHANGELOG.md section for ${ver}; add one before tagging"
+              exit 1
+            fi
             gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
               --title "kast ${GITHUB_REF_NAME}" \
-              --generate-notes
+              --notes-file RELEASE_NOTES.md
           fi
