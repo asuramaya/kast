@@ -22,9 +22,16 @@ CONTROL_CENTER="${KAST_LIBDIR}/kast-control-center"
 # for the .deb, ~/.local/share/kast/VERSION for a source install), plus a
 # checkout-relative fallback for running straight from src/bin/ uninstalled
 # (src/bin/../../packaging/VERSION, since VERSION lives in packaging/, not
-# as a sibling of bin/ under src/ — REPO-STANDARD.md Wave 5).
+# as a sibling of bin/ under src/ — REPO-STANDARD.md Wave 5). The
+# checkout-relative candidate goes FIRST: it can only ever resolve under a
+# real checkout (an installed copy's KAST_LIBDIR sits under /usr/bin or
+# ~/.local/bin, so the same ../../packaging/VERSION climb lands outside any
+# real directory and falls through harmlessly), so putting it last let an
+# operator's real installed VERSION silently win over the checkout's own
+# when running this script directly from a checkout that also has a real
+# install on the same machine (Alfred, msg 1432).
 KAST_VERSION="unknown"
-for _vf in "/usr/share/${APP_ID}/VERSION" "${DATA_HOME}/${APP_ID}/VERSION" "${KAST_LIBDIR}/../../packaging/VERSION"; do
+for _vf in "${KAST_LIBDIR}/../../packaging/VERSION" "/usr/share/${APP_ID}/VERSION" "${DATA_HOME}/${APP_ID}/VERSION"; do
     if [[ -f "${_vf}" ]]; then
         KAST_VERSION="$(tr -d '[:space:]' < "${_vf}")"
         break
