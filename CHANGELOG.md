@@ -3,6 +3,50 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-26
+
+Adopts the family's repo structure and documentation standard
+(`~/code/REPOS/REPO-STANDARD.md`, operator ruling 2026-07-26). Kast is the
+reference implementation this standard was written against. No change to
+any casting, receiving or update behavior; every functional path is
+unchanged and re-verified.
+
+### Added
+- `docs/USAGE.md`, `docs/ARCHITECTURE.md`, `docs/RELEASING.md` — the
+  family's four required topic documents (with `docs/RELEASE-SIGNING.md`,
+  already present). One doc per reader: a stranger, a user, a successor
+  seat, the operator at release time.
+- `man/kast.1` — every verb, installed to `~/.local/share/man/man1/` for a
+  source install and `/usr/share/man/man1/` for the `.deb`.
+- `data/` — `applications/`, `dbus/`, `config/` and `systemd/` folded into
+  one directory of files installed onto the system as-is.
+- `release-signing/sync-signers.sh` (was `tools/sync-signers.sh`), beside
+  the anchor it rebuilds.
+- `docs/ARCHITECTURE.md`'s Standard exemptions table: kast's declared,
+  on-the-record departures from the family standard (no daemon, no
+  `tests/attack.sh`, `youtube-receiver/` as a second runtime).
+
+### Changed
+- `VERSION` at root is now the only version constant. `bin/kast` and
+  `bin/kast-update` read it at runtime from a persistent shipped copy
+  (`/usr/share/kast/VERSION` for the `.deb`, `~/.local/share/kast/VERSION`
+  for a source install) instead of `bin/kast` carrying its own literal.
+- `release.yml` builds release notes from the matching `CHANGELOG.md`
+  section via `--notes-file`, refusing the release when it's missing,
+  instead of `--generate-notes`'s commit dump.
+- README trimmed to what a stranger needs before installing; the old Repo
+  Layout table and Troubleshooting section moved to their real owners,
+  `docs/ARCHITECTURE.md` and `docs/USAGE.md`. `SECURITY.md` expanded with
+  the full threat model that was previously stranded in the README.
+  `CONTRIBUTING.md` rewritten around the real `make` targets.
+
+### Removed
+- `docs/STATUS-SEAM.md`, which had claimed "design only, nothing here is
+  implemented" since before the seam shipped in v0.7.3. Folded into
+  `docs/ARCHITECTURE.md` in present tense, from the real implementation.
+- `docs/SEAM-SPEC.md`, untracked correspondence that didn't belong in the
+  repo. Moved to the seat's office.
+
 ## [0.8.0] - 2026-07-23
 
 Converges `kast update`'s trust chain onto the family's shared update spine
