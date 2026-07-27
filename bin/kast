@@ -2,11 +2,6 @@
 set -euo pipefail
 
 APP_ID="kast"
-# Source of truth is the repo-root VERSION file; this line mirrors it so the
-# installed standalone binary (which ships without VERSION beside it) still knows
-# its version. CI asserts the two stay in sync (see .github/workflows/ci.yml and
-# release.yml).
-KAST_VERSION="0.8.0"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -21,6 +16,18 @@ PYATV_STORAGE="${STATE_HOME}/${APP_ID}/pyatv-storage"
 KAST_LIBDIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "$0")")" && pwd)"
 AIRPLAY_HELPER="${KAST_LIBDIR}/kast-airplay"
 CONTROL_CENTER="${KAST_LIBDIR}/kast-control-center"
+
+# VERSION is the one version constant (REPO-STANDARD.md) — it ships as a
+# persistent runtime file in both install layouts (/usr/share/kast/VERSION
+# for the .deb, ~/.local/share/kast/VERSION for a source install), plus a
+# checkout-relative fallback for running straight from bin/ uninstalled.
+KAST_VERSION="unknown"
+for _vf in "/usr/share/${APP_ID}/VERSION" "${DATA_HOME}/${APP_ID}/VERSION" "${KAST_LIBDIR}/../VERSION"; do
+    if [[ -f "${_vf}" ]]; then
+        KAST_VERSION="$(tr -d '[:space:]' < "${_vf}")"
+        break
+    fi
+done
 # gnome-network-displays daemon (>=0.99.0) exposes a D-Bus connect API, so kast
 # can do one-click Chromecast/Miracast streaming instead of just opening the GUI.
 GND_DAEMON_BIN="gnome-network-displays-daemon"

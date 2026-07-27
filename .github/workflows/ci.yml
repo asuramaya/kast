@@ -14,13 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: VERSION matches KAST_VERSION
+      - name: One version constant (REPO-STANDARD.md)
         run: |
-          file="$(tr -d '[:space:]' < VERSION)"
-          script="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' bin/kast)"
-          echo "VERSION=${file} script=${script}"
-          if [ "${file}" != "${script}" ]; then
-            echo "::error::VERSION ${file} does not match KAST_VERSION ${script} in bin/kast"
+          if grep -n 'KAST_VERSION="[0-9]' bin/kast bin/kast-update 2>/dev/null; then
+            echo "::error::a literal version string exists outside VERSION"
             exit 1
           fi
 

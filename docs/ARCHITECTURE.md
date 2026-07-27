@@ -109,6 +109,11 @@ Both layouts have to ship the full vendored set from `bin/`. Shipping the execut
 forgetting `sutra_update.py` produces an install that works until the first update and then
 dies on an import, which is a mistake this family has made more than once.
 
+`VERSION` ships the same way, as a persistent runtime file next to the install
+(`/usr/share/kast/VERSION` for the `.deb`, `~/.local/share/kast/VERSION` for a source
+install), so `bin/kast` and `kast-update` can read it after the fact rather than carry their
+own copy of the number.
+
 ## The update path
 
 `kast update` runs `bin/kast-update`, which is a thin wrapper over `bin/sutra_update.py`. That

@@ -9,10 +9,8 @@ and the signing key never goes near CI.
 
 ## 1. Prepare
 
-Bump the version. It currently lives in two places, `VERSION` at the root and `KAST_VERSION`
-near the top of `bin/kast`, and CI asserts they match the tag. Set both. (Collapsing these
-into one constant is queued; until then, a mismatch fails the release rather than shipping a
-lie.)
+Bump `VERSION` at the root. It's the one version constant (`bin/kast` and `kast-update` both
+read it at runtime); CI asserts it matches the tag.
 
 Write the `CHANGELOG.md` entry under a `## [X.Y.Z] - YYYY-MM-DD` heading. This is not
 optional bookkeeping: the release workflow lifts that section verbatim as the release notes,
@@ -84,8 +82,8 @@ from published releases and shows anything published without a `.sig` as awaitin
 **CI refuses with "no CHANGELOG.md section"** means the heading doesn't contain the version.
 Add the section and re-push the tag.
 
-**The tag assertion fails** means `VERSION`, `KAST_VERSION` and the tag disagree. Fix them,
-delete the tag, tag again.
+**The tag assertion fails** means `VERSION` and the tag disagree. Fix it, delete the tag, tag
+again.
 
 **A client reports "armed but release is unsigned"** means the release was published and never
 sealed. Nothing is broken in the artifact; it needs the operator's signature uploading.

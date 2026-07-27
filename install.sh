@@ -180,13 +180,9 @@ if [[ ! -f "${ROOT_DIR}/bin/kast" ]]; then
     bootstrap_from_release "$@"
 fi
 
-# The repo-root VERSION file is the source of truth; fall back to the value
-# embedded in bin/kast for tarballs that predate the VERSION file.
-if [[ -f "${ROOT_DIR}/VERSION" ]]; then
-    KAST_VERSION="$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION")"
-else
-    KAST_VERSION="$(sed -n 's/^KAST_VERSION="\(.*\)"$/\1/p' "${ROOT_DIR}/bin/kast" 2>/dev/null)"
-fi
+# VERSION is the one version constant (REPO-STANDARD.md) — the repo-root file
+# is the source of truth for everything below.
+KAST_VERSION="$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION" 2>/dev/null)"
 KAST_VERSION="${KAST_VERSION:-unknown}"
 
 EXT_UUID="kast@asuramaya"
@@ -300,6 +296,9 @@ install_user_files() {
     # no other standing checkout for kast-update to read release-signing/
     # allowed_signers from.
     install -D -m 644 "${ROOT_DIR}/release-signing/allowed_signers" "${DATA_HOME}/${APP_ID}/allowed_signers"
+    # The one version constant (REPO-STANDARD.md): bin/kast and kast-update
+    # both read this at runtime rather than carry their own literal.
+    install -D -m 644 "${ROOT_DIR}/VERSION" "${DATA_HOME}/${APP_ID}/VERSION"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
         install -D -m 644 "${ROOT_DIR}/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi

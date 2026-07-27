@@ -52,6 +52,13 @@ ANCHOR_CANDIDATES = (
     os.path.join(DATA_HOME, "kast", "allowed_signers"),  # source install (persistent copy)
     os.path.join(_SRC_DIR, "release-signing", "allowed_signers"),  # run from a checkout
 )
+# VERSION is the one version constant (REPO-STANDARD.md) — same three-layout
+# candidate order as the anchor above.
+VERSION_CANDIDATES = (
+    "/usr/share/kast/VERSION",
+    os.path.join(DATA_HOME, "kast", "VERSION"),
+    os.path.join(_SRC_DIR, "VERSION"),
+)
 
 
 def deb_version():
@@ -65,19 +72,18 @@ def deb_version():
 
 
 def installed_version():
-    """dpkg first; else parse KAST_VERSION out of the sibling kast script. A
-    source/tarball install writes no separate VERSION file, and this stays
-    exactly in sync with the CI-enforced VERSION<->KAST_VERSION invariant."""
+    """dpkg first; else the shipped VERSION file (VERSION_CANDIDATES)."""
     v = deb_version()
     if v:
         return v
-    try:
-        with open(os.path.join(_SELF_DIR, "kast")) as f:
-            for line in f:
-                if line.startswith("KAST_VERSION="):
-                    return line.split("=", 1)[1].strip().strip('"')
-    except OSError:
-        pass
+    for p in VERSION_CANDIDATES:
+        try:
+            with open(p) as f:
+                ver = f.read().strip()
+            if ver:
+                return ver
+        except OSError:
+            continue
     return None
 
 
