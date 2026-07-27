@@ -2,7 +2,7 @@
 
 Everything the CLI, the tile and the preferences dialog can do. If you just installed
 Kast, start with `kast doctor`. For the short version, see the
-[README](../README.md).
+[README](../README.md); for a terminal reference, `man kast`.
 
 Almost every command that prints something accepts `--json`, which is how the GNOME
 extension talks to the CLI.
@@ -170,7 +170,7 @@ casting drops Wi-Fi by default.
 
 It writes `~/.config/kast/uxplay.conf`, which is the same file the CLI reads. You can edit
 that file directly; start from
-[config/uxplay.conf.example](../config/uxplay.conf.example). It's sourced like a
+[data/config/uxplay.conf.example](../data/config/uxplay.conf.example). It's sourced like a
 shell rc file, so treat it as code you own. The preferences dialog escapes everything it
 writes there.
 

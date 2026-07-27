@@ -71,14 +71,12 @@ snapshot is absent; the menu just goes back to being slow.
 | `bin/sutra_update.py` | the family's shared update spine, vendored byte-identical from `sutra` |
 | `bin/sutra_update.version`, `.commit` | drift anchors for the vendored copy |
 | `shell-extension/kast@asuramaya/` | the GNOME pill: `extension.js` is the tile, `prefs.js` the settings dialog |
-| `systemd/user/` | the three off-by-default receiver units, plus the update service and timer |
-| `config/` | shipped config: the PipeWire RAOP drop-in, and the `uxplay.conf` example |
-| `applications/` | the desktop entry that opens the picker |
-| `dbus/` | the D-Bus activation file that starts the gnome-network-displays daemon on demand |
+| `data/` | files installed onto the system as-is: `systemd/user/` (the three off-by-default receiver units, plus the update service and timer), `config/` (the PipeWire RAOP drop-in, the `uxplay.conf` example), `applications/` (the desktop entry that opens the picker), `dbus/` (the activation file that starts the gnome-network-displays daemon on demand) |
 | `youtube-receiver/` | a separate Node runtime, the DIAL receiver built on `yt-cast-receiver` |
 | `packaging/deb/` | `.deb` maintainer scripts. `make deb` builds one and never installs it |
 | `release-signing/allowed_signers` | the trust anchor for release verification |
-| `tools/sync-signers.sh` | rebuilds that anchor from the canonical public keys |
+| `release-signing/sync-signers.sh` | rebuilds that anchor from the canonical public keys |
+| `man/kast.1` | the man page: every verb, kept in sync with `docs/USAGE.md` by hand, same as every sibling pill's |
 | `tests/` | `smoke.sh` and `test_signing.sh` |
 | `install.sh`, `uninstall.sh` | the user-scope installer and its symmetric removal |
 | `packages.txt` | the apt packages the installer needs, one per line with comments |
@@ -157,4 +155,3 @@ Kast doesn't have is listed here. A gap that isn't in this table is a bug, not a
 | no daemon, and no vendored `sutra.py` | Kast is the family's glue layer. It has no daemon, so the shared `ControlServer` runtime doesn't apply. It vendors `sutra_update.py` alone, which is standalone and stdlib-only |
 | no `tests/attack.sh` | there's no daemon and no socket surface of its own to fuzz. The inbound receivers are upstream programs, and hardening them belongs upstream. `make attack` exists and says so rather than being silently absent |
 | `youtube-receiver/` as a second runtime | the only maintained DIAL receiver for YouTube is a Node library. Documented above, and confined to its own directory |
-| `man/kast.1` not yet present | pending; it will be generated from [USAGE.md](USAGE.md) |

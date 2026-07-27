@@ -22,7 +22,7 @@ jobs:
           fi
 
       - name: ShellCheck
-        run: shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck tools/sync-signers.sh tests/smoke.sh tests/test_signing.sh
+        run: shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 
       - name: Python helpers (syntax)
         run: python3 -m py_compile bin/kast-airplay bin/kast-control-center bin/kast-update bin/sutra_update.py
@@ -37,6 +37,9 @@ jobs:
 
       - name: Shell extension metadata (valid JSON)
         run: python3 -c "import json; json.load(open('shell-extension/kast@asuramaya/metadata.json'))"
+
+      - name: man page (syntax)
+        run: groff -man -Tutf8 -ww man/kast.1 > /dev/null
 
       - name: CLI smoke
         run: bash tests/smoke.sh

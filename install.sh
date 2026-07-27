@@ -27,7 +27,7 @@ SIGN_NAMESPACE="kast-release"
 # that point there is no sibling release-signing/allowed_signers to read.
 # Ships empty until a key is provisioned; kept in sync with
 # release-signing/allowed_signers by `make sync-signers`
-# (tools/sync-signers.sh) — never hand-edit this. Single-quoted deliberately:
+# (release-signing/sync-signers.sh) — never hand-edit this. Single-quoted deliberately:
 # the value can span multiple lines (one per pinned key) and must never be
 # shell-interpolated. While empty, verification degrades to sha256-only with
 # a printed warning — kast has no unattended install path (every bootstrap or
@@ -262,7 +262,7 @@ install_gnd_dbus_service() {
     daemon_bin="$(command -v gnome-network-displays-daemon 2>/dev/null || true)"
     [[ -n "${daemon_bin}" ]] || return 0
     svc="${DATA_HOME}/dbus-1/services/org.gnome.NetworkDisplays.Daemon.service"
-    install -D -m 644 "${ROOT_DIR}/dbus/org.gnome.NetworkDisplays.Daemon.service" "${svc}"
+    install -D -m 644 "${ROOT_DIR}/data/dbus/org.gnome.NetworkDisplays.Daemon.service" "${svc}"
     # Escape sed replacement metacharacters (& | \) so an unusual install path
     # can't corrupt the Exec= line the session bus will run.
     local daemon_esc
@@ -272,7 +272,7 @@ install_gnd_dbus_service() {
 
 install_user_files() {
     mkdir -p "${BIN_DIR}"
-    install -D -m 644 "${ROOT_DIR}/config/pipewire/50-raop.conf" "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
+    install -D -m 644 "${ROOT_DIR}/data/config/pipewire/50-raop.conf" "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
     install -D -m 755 "${ROOT_DIR}/bin/kast" "${BIN_DIR}/kast"
     # AirPlay video-out helper + Adwaita control-center window (kast finds them
     # next to itself).
@@ -299,18 +299,20 @@ install_user_files() {
     # The one version constant (REPO-STANDARD.md): bin/kast and kast-update
     # both read this at runtime rather than carry their own literal.
     install -D -m 644 "${ROOT_DIR}/VERSION" "${DATA_HOME}/${APP_ID}/VERSION"
+    # ~/.local/share/man is on the default manpath; no mandb/texinfo step needed.
+    install -D -m 644 "${ROOT_DIR}/man/kast.1" "${DATA_HOME}/man/man1/kast.1"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
-        install -D -m 644 "${ROOT_DIR}/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
+        install -D -m 644 "${ROOT_DIR}/data/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi
-    install -D -m 644 "${ROOT_DIR}/systemd/user/uxplay.service" "${CONFIG_HOME}/systemd/user/uxplay.service"
-    install -D -m 644 "${ROOT_DIR}/systemd/user/shairport-sync.service" "${CONFIG_HOME}/systemd/user/shairport-sync.service"
-    install -D -m 644 "${ROOT_DIR}/systemd/user/kast-youtube.service" "${CONFIG_HOME}/systemd/user/kast-youtube.service"
+    install -D -m 644 "${ROOT_DIR}/data/systemd/user/uxplay.service" "${CONFIG_HOME}/systemd/user/uxplay.service"
+    install -D -m 644 "${ROOT_DIR}/data/systemd/user/shairport-sync.service" "${CONFIG_HOME}/systemd/user/shairport-sync.service"
+    install -D -m 644 "${ROOT_DIR}/data/systemd/user/kast-youtube.service" "${CONFIG_HOME}/systemd/user/kast-youtube.service"
     # Update-check timer: installed for family parity, NOT enabled — the tile
     # already checks in-process every 6h (see enable_services()).
-    install -D -m 644 "${ROOT_DIR}/systemd/user/kast-update.service" "${CONFIG_HOME}/systemd/user/kast-update.service"
-    install -D -m 644 "${ROOT_DIR}/systemd/user/kast-update.timer" "${CONFIG_HOME}/systemd/user/kast-update.timer"
+    install -D -m 644 "${ROOT_DIR}/data/systemd/user/kast-update.service" "${CONFIG_HOME}/systemd/user/kast-update.service"
+    install -D -m 644 "${ROOT_DIR}/data/systemd/user/kast-update.timer" "${CONFIG_HOME}/systemd/user/kast-update.timer"
     install_gnd_dbus_service
-    install -D -m 644 "${ROOT_DIR}/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
+    install -D -m 644 "${ROOT_DIR}/data/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
     # The desktop session's PATH may not include ~/.local/bin, so point the
     # launcher's Exec at the absolute kast path (escape sed metacharacters in case
     # $HOME contains & | or \).

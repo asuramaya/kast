@@ -111,6 +111,7 @@ if command -v dpkg-deb >/dev/null 2>&1; then
                         usr/lib/systemd/user/uxplay.service usr/lib/systemd/user/kast-update.timer \
                         usr/share/kast/extension/kast@asuramaya/extension.js \
                         usr/share/applications/kast-center.desktop \
+                        usr/share/man/man1/kast.1 \
                         usr/share/pipewire/pipewire.conf.d/50-raop.conf; do
                 grep -q "${want}" <<<"${CONTENTS}" || { bad "deb missing ${want}"; deb_ok=0; }
             done
@@ -134,10 +135,10 @@ src_ok=1
 # Single-quoted on purpose: these are the literal install.sh source strings
 # to grep for, not variables to expand here.
 # shellcheck disable=SC2016
-for want in '${BIN_DIR}/sutra_update.py' '${BIN_DIR}/sutra_update.version' '${DATA_HOME}/${APP_ID}/allowed_signers'; do
+for want in '${BIN_DIR}/sutra_update.py' '${BIN_DIR}/sutra_update.version' '${DATA_HOME}/${APP_ID}/allowed_signers' '${DATA_HOME}/${APP_ID}/VERSION' '${DATA_HOME}/man/man1/kast.1'; do
     grep -qF "${want}" "${ROOT_DIR}/install.sh" || { bad "install.sh missing ${want}"; src_ok=0; }
 done
-[[ "${src_ok}" -eq 1 ]] && ok "install.sh ships sutra_update.py + allowed_signers (source layout)"
+[[ "${src_ok}" -eq 1 ]] && ok "install.sh ships sutra_update.py + allowed_signers + VERSION + man page (source layout)"
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [[ "${fail}" -eq 0 ]]

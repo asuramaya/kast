@@ -82,7 +82,7 @@ kast doctor                     what's wrong, and how to fix it
 ```
 
 Every command, plus the tile, the preferences dialog and troubleshooting, lives in
-[docs/USAGE.md](docs/USAGE.md).
+[docs/USAGE.md](docs/USAGE.md) and `man kast`.
 
 ## Updating
 

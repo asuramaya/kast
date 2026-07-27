@@ -65,8 +65,8 @@ as text only.
 ## Pull requests
 
 Open one against `main`. CI has to pass. If you change behaviour, update
-[docs/USAGE.md](docs/USAGE.md) and add a `CHANGELOG.md` entry. Small, focused PRs get looked
-at fastest.
+[docs/USAGE.md](docs/USAGE.md), `man/kast.1` if the verb it describes changed, and add a
+`CHANGELOG.md` entry. Small, focused PRs get looked at fastest.
 
 Each document has an owner, and it's worth a moment to put a change in the right one.
 `README.md` answers what a stranger needs before installing. `docs/USAGE.md` covers everything

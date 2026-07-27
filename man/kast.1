@@ -1,0 +1,238 @@
+.TH KAST 1 "2026-07-26" "kast 0.8.0" "kast manual"
+.SH NAME
+kast \- Win+K-style cast panel for GNOME
+.SH SYNOPSIS
+.B kast
+.RI [ verb ]
+.RI [ options ]
+.SH DESCRIPTION
+.B kast
+wires AirPlay, Chromecast and Miracast into one GNOME Quick Settings tile, one
+.B Super+K
+shortcut, and one CLI. With no verb, it runs
+.BR status .
+Almost every verb that prints something accepts
+.BR \-\-json ,
+which is how the Quick Settings extension talks to the CLI; kast never calls
+into a device from anywhere else.
+.PP
+This page is a command reference. For what each thing does and why, see
+.I docs/USAGE.md
+in the repository, or the web copy linked from the project's README.
+.SH DISCOVERY
+.TP
+.BI targets " [--json] [--scan]"
+Everything known: Chromecast, AirPlay and (after a scan) Miracast.
+.B \-\-scan
+issues fresh mDNS queries instead of reading the avahi cache.
+.TP
+.BI cast\-targets " [--json] [--scan]"
+Chromecast only.
+.TP
+.BI airplay\-targets " [--json] [--scan]"
+AirPlay only.
+.TP
+.BI miracast\-targets " [--json]"
+Miracast, from an on\-demand Wi\-Fi P2P find (never cached).
+.SH CASTING
+.TP
+.BI pick " [--miracast]"
+The graphical "cast to\&..." picker, same as
+.BR Super+K .
+.B \-\-miracast
+includes a Miracast scan.
+.TP
+.BI connect " target " "[url\-or\-file]"
+Mirror this screen to
+.IR target ,
+or play a URL or file on it instead of mirroring.
+.TP
+.BI cast\-file " target " url\-or\-file
+Play a file or URL on
+.I target
+without mirroring the screen.
+.TP
+.BI display\-connect " target"
+Display mirroring specifically.
+.TP
+.B disconnect
+Stop the active display stream.
+.TP
+.BI airplay\-pick " target"
+.BR airplay\-cast (1)'s
+GUI form: pick a video file, then cast it. Used by the tile.
+.TP
+.BI cast\-file\-pick " target"
+Like
+.I airplay\-pick
+but for any target, AirPlay or Chromecast.
+.TP
+.BI airplay\-pair " target " "[--gui]"
+One\-off pairing with an AirPlay TV, prompted in the terminal or, with
+.BR \-\-gui ,
+graphically.
+.SH CONTROL
+.TP
+.B control
+List controllable devices.
+.TP
+.BI control " target " caps
+What this device actually supports.
+.TP
+.BI control " target " now\-playing
+.TP
+.BI control " target " action " [arg]"
+Actions:
+.BR stop ", " play ", " pause ", " play_pause ", " next ", " previous ,
+.BI seek " seconds" ,
+.BR volume_up ", " volume_down ,
+.BI set_volume " 0\-100" ,
+.BR power_on ", " power_off ,
+.BI key " up|down|left|right|select|menu|home" ,
+.BI launch_app " id" .
+.TP
+.BI control\-center " [target]"
+The graphical remote window.
+.SH RECEIVING
+Three receivers, all off by default, all LAN\-facing. Each has the same six
+verbs; substitute
+.I audio\-receiver\-
+or
+.I youtube\-receiver\-
+for
+.I receiver\-
+to reach the other two.
+.TP
+.BR receiver\-start ", " receiver\-stop ", " receiver\-restart ", " receiver\-status
+AirPlay screen mirroring in, via
+.BR uxplay (1).
+.TP
+.B toggle\-receiver
+.TP
+.B receiver\-run
+Run in the foreground, for debugging.
+.PP
+The AirPlay screen receiver is PIN\-gated by default. Treat the 4\-digit PIN
+as a speed bump, not authentication; stopping the receiver when idle is the
+real control.
+.SH AUDIO ROUTING
+.TP
+.BI sinks " [--json]"
+Available PipeWire sinks.
+.TP
+.BI select\-sink " id|name"
+.TP
+.BI select\-airplay " [name]"
+Route audio to an AirPlay speaker over PipeWire RAOP.
+.TP
+.B select\-local
+Route audio back to this machine.
+.TP
+.B open\-sound
+Open GNOME's Sound settings.
+.SH DISPLAY BEHAVIOUR
+.TP
+.BI set\-mode " mirror|video\-overlay"
+.TP
+.B get\-mode
+.TP
+.B open\-display
+GNOME Display settings.
+.TP
+.BI open\-display\-cast " [--drop\-wifi]"
+The one\-click
+.BR gnome\-network\-displays (1)
+connect path.
+.B \-\-drop\-wifi
+releases the Wi\-Fi radio for a Miracast group on adapters that need it.
+.TP
+.B open\-display\-cast\-plain
+Opens the
+.B gnome\-network\-displays
+GUI directly, skipping the one\-click D\-Bus path. The fallback on a GNOME
+Shell older than that daemon needs.
+.TP
+.B reconnect\-wifi
+Bring Wi\-Fi back after a Miracast session that dropped it.
+.SH HEALTH AND UPDATES
+.TP
+.BI status " [--json]"
+What's casting, what's receiving, what's discovered.
+.TP
+.B doctor
+Full health check (tools, discovery, receivers, casting, audio routing,
+desktop integration), with a fix hint per problem. Run this first when
+anything misbehaves.
+.TP
+.B repair
+Reinstall the pipx\-isolated
+.I pyatv
+and
+.I catt
+environments, for when an OS or Python upgrade leaves them pointing at a
+Python that's gone.
+.TP
+.B version
+.TP
+.BI check\-update " [--json]"
+Report only: is a newer release available.
+.TP
+.BI update " [--check [--json]] [--apt]"
+Install the latest release in place.
+.B \-\-check
+reports without installing (same as
+.BR check\-update ).
+.B \-\-apt
+also refreshes system packages; by default
+.B update
+leaves apt alone and needs no
+.BR sudo .
+A
+.B .deb
+install updates with the next
+.B .deb
+instead, and this verb refuses to touch it.
+.TP
+.BI install\-shortcut " [binding]"
+Bind or rebind the cast\-picker keyboard shortcut. Default
+.BR Super+K .
+.SH FILES
+.TP
+.I ~/.config/kast/uxplay.conf
+The receiver's config, sourced like a shell rc file. The preferences dialog
+writes it; anything else editing it should treat it as code.
+.TP
+.I $XDG_RUNTIME_DIR/kast/status.json
+The read seam the Quick Settings tile watches instead of shelling out on
+every open. Mode 0640, written atomically. Absent is a valid state, not a
+failure.
+.SH ENVIRONMENT
+.TP
+.B KAST_SHORTCUT
+Overrides the default keybinding at install time (see
+.BR install.sh ).
+.TP
+.B KAST_NO_UNSTABLE
+Set to
+.B 1
+to refuse the unreviewed main\-branch install fallback when no release
+asset exists.
+.SH EXIT STATUS
+Non\-zero on misuse or a failed action; the message on stderr says why.
+.B doctor
+and
+.B kast\-healthcheck (1)
+use exit status specifically to mean healthy/unhealthy, not just
+success/failure of the invocation itself.
+.SH SEE ALSO
+.BR kast\-healthcheck (1),
+.BR kast\-update (1),
+.BR uxplay (1),
+.BR gnome\-network\-displays (1)
+.br
+.I docs/USAGE.md
+and
+.I docs/ARCHITECTURE.md
+in the kast repository.
+.SH AUTHOR
+asuramaya and kast contributors.

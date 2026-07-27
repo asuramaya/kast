@@ -86,6 +86,7 @@ remove_files() {
           "${DATA_HOME}/applications/kast-tray.desktop" \
           "${DATA_HOME}/applications/ctrlk-cast-center.desktop" \
           "${DATA_HOME}/applications/ctrlk-cast-tray.desktop"
+    rm -f "${DATA_HOME}/man/man1/kast.1"
     rm -rf "${DATA_HOME:?}/${APP_ID:?}" "${DATA_HOME:?}/ctrlk-cast"
     rm -rf "${DATA_HOME:?}/gnome-shell/extensions/kast@asuramaya"
     rm -f "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"

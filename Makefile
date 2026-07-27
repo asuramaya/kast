@@ -53,10 +53,11 @@ check-sutra:
 # Canonical family grammar (`smoke attack check deb`): the same static checks
 # as CI's lint job, runnable locally in one shot.
 check: check-sutra
-	shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck tools/sync-signers.sh tests/smoke.sh tests/test_signing.sh
+	shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 	python3 -m py_compile bin/kast-airplay bin/kast-control-center bin/kast-update bin/sutra_update.py
 	node --check "shell-extension/kast@asuramaya/extension.js" "shell-extension/kast@asuramaya/prefs.js"
 	python3 -c "import json; json.load(open('shell-extension/kast@asuramaya/metadata.json'))"
+	groff -man -Tutf8 -ww man/kast.1 > /dev/null
 	@echo "all static checks passed"
 
 # kast is glue with no daemon and no socket to fuzz (canonical family
@@ -69,7 +70,7 @@ attack:
 # rebuild release-signing/allowed_signers from the canonical keys (see
 # docs/RELEASE-SIGNING.md — do NOT run casually; see the sequencing rule there)
 sync-signers:
-	bash tools/sync-signers.sh
+	bash release-signing/sync-signers.sh
 
 # kast has no root half: install.sh is user-scope end to end (it sudos
 # internally for apt only). Running it AS root would install into root's
@@ -113,6 +114,7 @@ deb:
 	install -d -m 0755 $(DEBROOT)/usr/share/pipewire/pipewire.conf.d
 	install -d -m 0755 $(DEBROOT)/usr/share/applications
 	install -d -m 0755 $(DEBROOT)/usr/lib/systemd/user
+	install -d -m 0755 $(DEBROOT)/usr/share/man/man1
 	install -m 0755 bin/kast bin/kast-airplay bin/kast-control-center \
 	    bin/kast-healthcheck bin/kast-update bin/kast-pill $(DEBROOT)/usr/bin/
 	# kast-update's engine: the family's shared update spine (Wave B
@@ -124,20 +126,21 @@ deb:
 	fi
 	install -m 0644 VERSION $(DEBROOT)/usr/share/kast/VERSION
 	install -m 0644 release-signing/allowed_signers $(DEBROOT)/usr/share/kast/allowed_signers
-	install -m 0644 config/uxplay.conf.example $(DEBROOT)/usr/share/kast/uxplay.conf.example
+	install -m 0644 man/kast.1 $(DEBROOT)/usr/share/man/man1/kast.1
+	install -m 0644 data/config/uxplay.conf.example $(DEBROOT)/usr/share/kast/uxplay.conf.example
 	install -m 0644 shell-extension/kast@asuramaya/extension.js \
 	    shell-extension/kast@asuramaya/prefs.js \
 	    shell-extension/kast@asuramaya/metadata.json \
 	    $(DEBROOT)/usr/share/kast/extension/kast@asuramaya/
 	sed 's#@DAEMON_BIN@#/usr/bin/gnome-network-displays-daemon#' \
-	    dbus/org.gnome.NetworkDisplays.Daemon.service \
+	    data/dbus/org.gnome.NetworkDisplays.Daemon.service \
 	    > $(DEBROOT)/usr/share/dbus-1/services/org.gnome.NetworkDisplays.Daemon.service
-	install -m 0644 config/pipewire/50-raop.conf $(DEBROOT)/usr/share/pipewire/pipewire.conf.d/50-raop.conf
-	install -m 0644 applications/kast-center.desktop $(DEBROOT)/usr/share/applications/kast-center.desktop
+	install -m 0644 data/config/pipewire/50-raop.conf $(DEBROOT)/usr/share/pipewire/pipewire.conf.d/50-raop.conf
+	install -m 0644 data/applications/kast-center.desktop $(DEBROOT)/usr/share/applications/kast-center.desktop
 	for u in uxplay shairport-sync kast-youtube kast-update; do \
-	    install -m 0644 systemd/user/$$u.service $(DEBROOT)/usr/lib/systemd/user/$$u.service; \
+	    install -m 0644 data/systemd/user/$$u.service $(DEBROOT)/usr/lib/systemd/user/$$u.service; \
 	done
-	install -m 0644 systemd/user/kast-update.timer $(DEBROOT)/usr/lib/systemd/user/kast-update.timer
+	install -m 0644 data/systemd/user/kast-update.timer $(DEBROOT)/usr/lib/systemd/user/kast-update.timer
 	install -m 0755 packaging/deb/postinst $(DEBROOT)/DEBIAN/postinst
 	install -m 0755 packaging/deb/prerm $(DEBROOT)/DEBIAN/prerm
 	install -m 0755 packaging/deb/postrm $(DEBROOT)/DEBIAN/postrm
