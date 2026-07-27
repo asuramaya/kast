@@ -32,14 +32,14 @@ jobs:
 
       - name: Shell extension (syntax)
         run: |
-          node --check "shell-extension/kast@asuramaya/extension.js"
-          node --check "shell-extension/kast@asuramaya/prefs.js"
+          node --check "extension/kast@asuramaya/extension.js"
+          node --check "extension/kast@asuramaya/prefs.js"
 
       - name: Shell extension metadata (valid JSON)
-        run: python3 -c "import json; json.load(open('shell-extension/kast@asuramaya/metadata.json'))"
+        run: python3 -c "import json; json.load(open('extension/kast@asuramaya/metadata.json'))"
 
       - name: man page (syntax)
-        run: groff -man -Tutf8 -ww man/kast.1 > /dev/null
+        run: groff -man -Tutf8 -ww data/man/man1/kast.1 > /dev/null
 
       - name: CLI smoke
         run: bash tests/smoke.sh

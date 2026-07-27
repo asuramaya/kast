@@ -55,9 +55,9 @@ check-sutra:
 check: check-sutra
 	shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 	python3 -m py_compile bin/kast-airplay bin/kast-control-center bin/kast-update bin/sutra_update.py
-	node --check "shell-extension/kast@asuramaya/extension.js" "shell-extension/kast@asuramaya/prefs.js"
-	python3 -c "import json; json.load(open('shell-extension/kast@asuramaya/metadata.json'))"
-	groff -man -Tutf8 -ww man/kast.1 > /dev/null
+	node --check "extension/kast@asuramaya/extension.js" "extension/kast@asuramaya/prefs.js"
+	python3 -c "import json; json.load(open('extension/kast@asuramaya/metadata.json'))"
+	groff -man -Tutf8 -ww data/man/man1/kast.1 > /dev/null
 	@echo "all static checks passed"
 
 # kast is glue with no daemon and no socket to fuzz (canonical family
@@ -97,7 +97,7 @@ uninstall:
 # the pill only ever needs your own $$HOME and gnome-shell session — never root
 pill:
 	mkdir -p $(HOME)/.local/share/gnome-shell/extensions
-	cp -r shell-extension/kast@asuramaya $(HOME)/.local/share/gnome-shell/extensions/
+	cp -r extension/kast@asuramaya $(HOME)/.local/share/gnome-shell/extensions/
 	@echo "pill installed — now: gnome-extensions enable kast@asuramaya"
 	@echo "then log out and back in once (Wayland reloads extensions at login)"
 
@@ -126,11 +126,11 @@ deb:
 	fi
 	install -m 0644 VERSION $(DEBROOT)/usr/share/kast/VERSION
 	install -m 0644 release-signing/allowed_signers $(DEBROOT)/usr/share/kast/allowed_signers
-	install -m 0644 man/kast.1 $(DEBROOT)/usr/share/man/man1/kast.1
+	install -m 0644 data/man/man1/kast.1 $(DEBROOT)/usr/share/man/man1/kast.1
 	install -m 0644 data/config/uxplay.conf.example $(DEBROOT)/usr/share/kast/uxplay.conf.example
-	install -m 0644 shell-extension/kast@asuramaya/extension.js \
-	    shell-extension/kast@asuramaya/prefs.js \
-	    shell-extension/kast@asuramaya/metadata.json \
+	install -m 0644 extension/kast@asuramaya/extension.js \
+	    extension/kast@asuramaya/prefs.js \
+	    extension/kast@asuramaya/metadata.json \
 	    $(DEBROOT)/usr/share/kast/extension/kast@asuramaya/
 	sed 's#@DAEMON_BIN@#/usr/bin/gnome-network-displays-daemon#' \
 	    data/dbus/org.gnome.NetworkDisplays.Daemon.service \

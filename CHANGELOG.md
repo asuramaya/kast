@@ -3,6 +3,36 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-07-27
+
+Wave 4 of the REPO-STANDARD.md root-tidy pass. The sharpened root rule:
+"would a stranger be surprised to find this anywhere else?", not "is this
+file important" — almost everything fails that test, which is why roots
+bloat. Pure tree moves, no logic changes, no casting/receiving/update
+behavior affected; every installed path is unchanged, only the source tree
+moved. Verified with two real install-over-installed passes in each of the
+two install layouts (source and `.deb`), including confirming `man-db`'s
+trigger still indexes the page at its unchanged installed path.
+
+### Changed
+- `man/kast.1` -> `data/man/man1/kast.1`. A man page is a file installed
+  onto the system as-is, the same class as everything else in `data/`.
+  Also retires a self-contradiction in the family standard (a
+  single-file-directory exception sitting on top of its own
+  no-single-file-directories rule).
+- `packages.txt` -> `packaging/packages.txt`. An install input belongs
+  beside the other install inputs, not at root.
+- `shell-extension/` -> `extension/`. Kast was the only one of six family
+  repos using the longer name; kast is the reference repo now, so the odd
+  one out moves. Source path only — the installed path
+  (`/usr/share/kast/extension/`) and the extension's UUID (`kast@asuramaya`)
+  are unchanged.
+
+Root goes from 24 tracked entries to 22. A further move — the community
+files (`CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`) into
+`.github/` — is held pending an operator call on discoverability, and may
+land as a later release.
+
 ## [0.9.0] - 2026-07-26
 
 Adopts the family's repo structure and documentation standard

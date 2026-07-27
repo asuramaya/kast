@@ -242,7 +242,7 @@ done
 install_packages() {
     # Strip CRLF so a Windows-checkout packages.txt doesn't yield names with a
     # trailing \r that apt then can't resolve.
-    mapfile -t packages < <(grep -Ev '^\s*(#|$)' "${ROOT_DIR}/packages.txt" | tr -d '\r')
+    mapfile -t packages < <(grep -Ev '^\s*(#|$)' "${ROOT_DIR}/packaging/packages.txt" | tr -d '\r')
     # Optional feature dependencies, added only when their flag is set, so a
     # plain install stays lean.
     [[ "${WITH_AIRPLAY_AUDIO}" -eq 1 ]] && packages+=(shairport-sync)
@@ -300,7 +300,7 @@ install_user_files() {
     # both read this at runtime rather than carry their own literal.
     install -D -m 644 "${ROOT_DIR}/VERSION" "${DATA_HOME}/${APP_ID}/VERSION"
     # ~/.local/share/man is on the default manpath; no mandb/texinfo step needed.
-    install -D -m 644 "${ROOT_DIR}/man/kast.1" "${DATA_HOME}/man/man1/kast.1"
+    install -D -m 644 "${ROOT_DIR}/data/man/man1/kast.1" "${DATA_HOME}/man/man1/kast.1"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
         install -D -m 644 "${ROOT_DIR}/data/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi
@@ -320,9 +320,9 @@ install_user_files() {
     exec_esc="$(printf '%s' "${BIN_DIR}/kast " | sed -e 's/[\\&|]/\\&/g')"
     sed -i "s|^Exec=kast |Exec=${exec_esc}|" "${DATA_HOME}/applications/kast-center.desktop"
     # GNOME Quick Settings extension — the primary UI.
-    install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/extension.js" "${EXT_DIR}/extension.js"
-    install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/prefs.js" "${EXT_DIR}/prefs.js"
-    install -D -m 644 "${ROOT_DIR}/shell-extension/${EXT_UUID}/metadata.json" "${EXT_DIR}/metadata.json"
+    install -D -m 644 "${ROOT_DIR}/extension/${EXT_UUID}/extension.js" "${EXT_DIR}/extension.js"
+    install -D -m 644 "${ROOT_DIR}/extension/${EXT_UUID}/prefs.js" "${EXT_DIR}/prefs.js"
+    install -D -m 644 "${ROOT_DIR}/extension/${EXT_UUID}/metadata.json" "${EXT_DIR}/metadata.json"
 }
 
 remove_legacy_tray() {

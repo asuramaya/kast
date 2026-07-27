@@ -70,16 +70,15 @@ snapshot is absent; the menu just goes back to being slow.
 | `bin/kast-healthcheck` | CLI parity with the family: does the status.json seam agree with live systemd reality. Not wired into any timer; kast has no daemon to check periodically |
 | `bin/sutra_update.py` | the family's shared update spine, vendored byte-identical from `sutra` |
 | `bin/sutra_update.version`, `.commit` | drift anchors for the vendored copy |
-| `shell-extension/kast@asuramaya/` | the GNOME pill: `extension.js` is the tile, `prefs.js` the settings dialog |
-| `data/` | files installed onto the system as-is: `systemd/user/` (the three off-by-default receiver units, plus the update service and timer), `config/` (the PipeWire RAOP drop-in, the `uxplay.conf` example), `applications/` (the desktop entry that opens the picker), `dbus/` (the activation file that starts the gnome-network-displays daemon on demand) |
+| `extension/kast@asuramaya/` | the GNOME pill: `extension.js` is the tile, `prefs.js` the settings dialog |
+| `data/` | files installed onto the system as-is: `systemd/user/` (the three off-by-default receiver units, plus the update service and timer), `config/` (the PipeWire RAOP drop-in, the `uxplay.conf` example), `applications/` (the desktop entry that opens the picker), `dbus/` (the activation file that starts the gnome-network-displays daemon on demand), `man/man1/kast.1` (the man page: every verb, kept in sync with `docs/USAGE.md` by hand, same as every sibling pill's) |
 | `youtube-receiver/` | a separate Node runtime, the DIAL receiver built on `yt-cast-receiver` |
 | `packaging/deb/` | `.deb` maintainer scripts. `make deb` builds one and never installs it |
+| `packaging/packages.txt` | the apt packages the installer needs, one per line with comments |
 | `release-signing/allowed_signers` | the trust anchor for release verification |
 | `release-signing/sync-signers.sh` | rebuilds that anchor from the canonical public keys |
-| `man/kast.1` | the man page: every verb, kept in sync with `docs/USAGE.md` by hand, same as every sibling pill's |
 | `tests/` | `smoke.sh` and `test_signing.sh` |
 | `install.sh`, `uninstall.sh` | the user-scope installer and its symmetric removal |
-| `packages.txt` | the apt packages the installer needs, one per line with comments |
 
 `youtube-receiver/` is the one piece written in another language, and it's here because the
 only maintained DIAL receiver for YouTube is a Node library. It runs as its own user service,

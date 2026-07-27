@@ -15,14 +15,14 @@ set -euo pipefail
 EXT_UUID="kast@asuramaya"
 
 # Resolve the staged extension source: an explicit KAST_EXT_DIR always wins;
-# otherwise try the repo layout (bin/../shell-extension/$EXT_UUID, for
+# otherwise try the repo layout (bin/../extension/$EXT_UUID, for
 # `make pill` in a checkout) then the installed (.deb) layout.
 if [[ -n "${KAST_EXT_DIR:-}" ]]; then
     SRC_EXT="${KAST_EXT_DIR}"
 else
     _self="$(dirname "$(readlink -f "$0")")"
     SRC_EXT="/usr/share/kast/extension/${EXT_UUID}"
-    for _c in "${_self}/../shell-extension/${EXT_UUID}" "${_self}/../share/kast/extension/${EXT_UUID}"; do
+    for _c in "${_self}/../extension/${EXT_UUID}" "${_self}/../share/kast/extension/${EXT_UUID}"; do
         [[ -f "${_c}/metadata.json" ]] && { SRC_EXT="$(cd "${_c}" && pwd)"; break; }
     done
 fi
