@@ -3,6 +3,26 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-07-27
+
+Fixes the lint invocation that v0.10.0 shipped broken.
+
+### Fixed
+
+- **CI's ShellCheck step failed on every run.** Moving the config to
+  `packaging/shellcheckrc` in v0.10.0 relied on `shellcheck --rcfile`, a flag
+  that only exists from ShellCheck 0.11.0. The build on `ubuntu-latest` is
+  older and rejects it outright, so the job exited 3 before checking anything.
+  It passed locally only because this machine has 0.11.0: a version skew
+  between a developer's tools and CI's, invisible from either side alone.
+- The three exclusions are now passed as `-e SC2155,SC1090,SC1091`, which every
+  ShellCheck version accepts, with the reason for each recorded beside them in
+  the Makefile. `packaging/shellcheckrc` is removed — nothing auto-discovered
+  it, since ShellCheck only looks for a dotfile `.shellcheckrc`, so the broken
+  flag was its only reader.
+
+Nothing that ships changed: same install paths, same artifacts, same behaviour.
+
 ## [0.10.0] - 2026-07-27
 
 Waves 4 and 5 of the REPO-STANDARD.md root-tidy pass, shipped together as one

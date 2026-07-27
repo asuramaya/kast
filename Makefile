@@ -52,8 +52,17 @@ check-sutra:
 
 # Canonical family grammar (`smoke attack check deb`): the same static checks
 # as CI's lint job, runnable locally in one shot.
+# Exclusions are passed as flags, not via an rc file: shellcheck only grew
+# --rcfile in 0.11.0, and older builds (including the one on ubuntu-latest)
+# reject the flag outright, so an rc file either costs a root row or breaks CI.
+# SC2155  declare-and-assign on one line is intentional — `local x="$(cmd)"`
+#         deliberately swallows the substitution's status so set -e won't abort.
+# SC1090/SC1091  runtime `source` of the user config and dynamic paths cannot
+#         be followed statically.
+SHELLCHECK_EXCLUDES = SC2155,SC1090,SC1091
+
 check: check-sutra
-	shellcheck --rcfile packaging/shellcheckrc install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
+	shellcheck -e $(SHELLCHECK_EXCLUDES) install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 	python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/bin/sutra_update.py
 	node --check "src/extension/kast@asuramaya/extension.js" "src/extension/kast@asuramaya/prefs.js"
 	python3 -c "import json; json.load(open('src/extension/kast@asuramaya/metadata.json'))"

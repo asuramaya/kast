@@ -22,7 +22,10 @@ jobs:
           fi
 
       - name: ShellCheck
-        run: shellcheck --rcfile packaging/shellcheckrc install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
+        # -e rather than --rcfile: the flag only exists from shellcheck 0.11.0
+        # and ubuntu-latest ships an older build. Rationale per code is in the
+        # Makefile, which carries the same exclusion list.
+        run: shellcheck -e SC2155,SC1090,SC1091 install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 
       - name: Python helpers (syntax)
         run: python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/bin/sutra_update.py

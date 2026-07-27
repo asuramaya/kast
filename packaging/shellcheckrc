@@ -1,5 +1,0 @@
-# Declare-and-assign on one line is intentional: `local x="$(cmd)"` deliberately
-# swallows the substitution's exit status so `set -e` does not abort on it.
-disable=SC2155
-# Runtime `source` of the user config / dynamic paths cannot be followed statically.
-disable=SC1090,SC1091
