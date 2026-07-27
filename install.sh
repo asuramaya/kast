@@ -24,10 +24,10 @@ SIGN_NAMESPACE="kast-release"
 
 # Trust anchor for the curl-pipe-bash bootstrap below, EMBEDDED directly:
 # `curl .../install.sh | bash` fetches this ONE file over the network, so at
-# that point there is no sibling release-signing/allowed_signers to read.
-# Ships empty until a key is provisioned; kept in sync with
-# release-signing/allowed_signers by `make sync-signers`
-# (release-signing/sync-signers.sh) — never hand-edit this. Single-quoted deliberately:
+# that point there is no sibling packaging/release-signing/allowed_signers to
+# read. Ships empty until a key is provisioned; kept in sync with
+# packaging/release-signing/allowed_signers by `make sync-signers`
+# (packaging/release-signing/sync-signers.sh) — never hand-edit this. Single-quoted deliberately:
 # the value can span multiple lines (one per pinned key) and must never be
 # shell-interpolated. While empty, verification degrades to sha256-only with
 # a printed warning — kast has no unattended install path (every bootstrap or
@@ -176,13 +176,13 @@ bootstrap_from_release() {
     exit $?
 }
 
-if [[ ! -f "${ROOT_DIR}/bin/kast" ]]; then
+if [[ ! -f "${ROOT_DIR}/src/bin/kast" ]]; then
     bootstrap_from_release "$@"
 fi
 
-# VERSION is the one version constant (REPO-STANDARD.md) — the repo-root file
-# is the source of truth for everything below.
-KAST_VERSION="$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION" 2>/dev/null)"
+# VERSION is the one version constant (REPO-STANDARD.md) — the packaging/VERSION
+# file is the source of truth for everything below.
+KAST_VERSION="$(tr -d '[:space:]' < "${ROOT_DIR}/packaging/VERSION" 2>/dev/null)"
 KAST_VERSION="${KAST_VERSION:-unknown}"
 
 EXT_UUID="kast@asuramaya"
@@ -262,7 +262,7 @@ install_gnd_dbus_service() {
     daemon_bin="$(command -v gnome-network-displays-daemon 2>/dev/null || true)"
     [[ -n "${daemon_bin}" ]] || return 0
     svc="${DATA_HOME}/dbus-1/services/org.gnome.NetworkDisplays.Daemon.service"
-    install -D -m 644 "${ROOT_DIR}/data/dbus/org.gnome.NetworkDisplays.Daemon.service" "${svc}"
+    install -D -m 644 "${ROOT_DIR}/src/data/dbus/org.gnome.NetworkDisplays.Daemon.service" "${svc}"
     # Escape sed replacement metacharacters (& | \) so an unusual install path
     # can't corrupt the Exec= line the session bus will run.
     local daemon_esc
@@ -272,47 +272,47 @@ install_gnd_dbus_service() {
 
 install_user_files() {
     mkdir -p "${BIN_DIR}"
-    install -D -m 644 "${ROOT_DIR}/data/config/pipewire/50-raop.conf" "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
-    install -D -m 755 "${ROOT_DIR}/bin/kast" "${BIN_DIR}/kast"
+    install -D -m 644 "${ROOT_DIR}/src/data/config/pipewire/50-raop.conf" "${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
+    install -D -m 755 "${ROOT_DIR}/src/bin/kast" "${BIN_DIR}/kast"
     # AirPlay video-out helper + Adwaita control-center window (kast finds them
     # next to itself).
-    install -D -m 755 "${ROOT_DIR}/bin/kast-airplay" "${BIN_DIR}/kast-airplay"
-    install -D -m 755 "${ROOT_DIR}/bin/kast-control-center" "${BIN_DIR}/kast-control-center"
+    install -D -m 755 "${ROOT_DIR}/src/bin/kast-airplay" "${BIN_DIR}/kast-airplay"
+    install -D -m 755 "${ROOT_DIR}/src/bin/kast-control-center" "${BIN_DIR}/kast-control-center"
     # Family CLI parity: kast has no daemon, so kast-healthcheck checks the
     # status.json seam instead of a control socket.
-    install -D -m 755 "${ROOT_DIR}/bin/kast-healthcheck" "${BIN_DIR}/kast-healthcheck"
-    install -D -m 755 "${ROOT_DIR}/bin/kast-update" "${BIN_DIR}/kast-update"
+    install -D -m 755 "${ROOT_DIR}/src/bin/kast-healthcheck" "${BIN_DIR}/kast-healthcheck"
+    install -D -m 755 "${ROOT_DIR}/src/bin/kast-update" "${BIN_DIR}/kast-update"
     # kast-update's engine: the family's shared update spine (Wave B
     # convergence, docs/RELEASE-SIGNING.md), vendored beside it as a plain
     # sibling import — never hand-edit, re-vendor via sutra's vendor.sh.
-    install -D -m 644 "${ROOT_DIR}/bin/sutra_update.py" "${BIN_DIR}/sutra_update.py"
-    install -D -m 644 "${ROOT_DIR}/bin/sutra_update.version" "${BIN_DIR}/sutra_update.version"
-    if [[ -f "${ROOT_DIR}/bin/sutra_update.commit" ]]; then
-        install -D -m 644 "${ROOT_DIR}/bin/sutra_update.commit" "${BIN_DIR}/sutra_update.commit"
+    install -D -m 644 "${ROOT_DIR}/src/bin/sutra_update.py" "${BIN_DIR}/sutra_update.py"
+    install -D -m 644 "${ROOT_DIR}/src/bin/sutra_update.version" "${BIN_DIR}/sutra_update.version"
+    if [[ -f "${ROOT_DIR}/src/bin/sutra_update.commit" ]]; then
+        install -D -m 644 "${ROOT_DIR}/src/bin/sutra_update.commit" "${BIN_DIR}/sutra_update.commit"
     fi
     # A persistent copy of the signing anchor for kast-update to verify
     # against after install: the embedded RELEASE_ALLOWED_SIGNERS above only
     # covers the curl-pipe bootstrap itself, and a source-installed kast has
-    # no other standing checkout for kast-update to read release-signing/
-    # allowed_signers from.
-    install -D -m 644 "${ROOT_DIR}/release-signing/allowed_signers" "${DATA_HOME}/${APP_ID}/allowed_signers"
-    # The one version constant (REPO-STANDARD.md): bin/kast and kast-update
+    # no other standing checkout for kast-update to read
+    # packaging/release-signing/allowed_signers from.
+    install -D -m 644 "${ROOT_DIR}/packaging/release-signing/allowed_signers" "${DATA_HOME}/${APP_ID}/allowed_signers"
+    # The one version constant (REPO-STANDARD.md): src/bin/kast and kast-update
     # both read this at runtime rather than carry their own literal.
-    install -D -m 644 "${ROOT_DIR}/VERSION" "${DATA_HOME}/${APP_ID}/VERSION"
+    install -D -m 644 "${ROOT_DIR}/packaging/VERSION" "${DATA_HOME}/${APP_ID}/VERSION"
     # ~/.local/share/man is on the default manpath; no mandb/texinfo step needed.
-    install -D -m 644 "${ROOT_DIR}/data/man/man1/kast.1" "${DATA_HOME}/man/man1/kast.1"
+    install -D -m 644 "${ROOT_DIR}/src/data/man/man1/kast.1" "${DATA_HOME}/man/man1/kast.1"
     if [[ ! -f "${CONFIG_HOME}/${APP_ID}/uxplay.conf" ]]; then
-        install -D -m 644 "${ROOT_DIR}/data/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
+        install -D -m 644 "${ROOT_DIR}/src/data/config/uxplay.conf.example" "${CONFIG_HOME}/${APP_ID}/uxplay.conf"
     fi
-    install -D -m 644 "${ROOT_DIR}/data/systemd/user/uxplay.service" "${CONFIG_HOME}/systemd/user/uxplay.service"
-    install -D -m 644 "${ROOT_DIR}/data/systemd/user/shairport-sync.service" "${CONFIG_HOME}/systemd/user/shairport-sync.service"
-    install -D -m 644 "${ROOT_DIR}/data/systemd/user/kast-youtube.service" "${CONFIG_HOME}/systemd/user/kast-youtube.service"
+    install -D -m 644 "${ROOT_DIR}/src/data/systemd/user/uxplay.service" "${CONFIG_HOME}/systemd/user/uxplay.service"
+    install -D -m 644 "${ROOT_DIR}/src/data/systemd/user/shairport-sync.service" "${CONFIG_HOME}/systemd/user/shairport-sync.service"
+    install -D -m 644 "${ROOT_DIR}/src/data/systemd/user/kast-youtube.service" "${CONFIG_HOME}/systemd/user/kast-youtube.service"
     # Update-check timer: installed for family parity, NOT enabled — the tile
     # already checks in-process every 6h (see enable_services()).
-    install -D -m 644 "${ROOT_DIR}/data/systemd/user/kast-update.service" "${CONFIG_HOME}/systemd/user/kast-update.service"
-    install -D -m 644 "${ROOT_DIR}/data/systemd/user/kast-update.timer" "${CONFIG_HOME}/systemd/user/kast-update.timer"
+    install -D -m 644 "${ROOT_DIR}/src/data/systemd/user/kast-update.service" "${CONFIG_HOME}/systemd/user/kast-update.service"
+    install -D -m 644 "${ROOT_DIR}/src/data/systemd/user/kast-update.timer" "${CONFIG_HOME}/systemd/user/kast-update.timer"
     install_gnd_dbus_service
-    install -D -m 644 "${ROOT_DIR}/data/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
+    install -D -m 644 "${ROOT_DIR}/src/data/applications/kast-center.desktop" "${DATA_HOME}/applications/kast-center.desktop"
     # The desktop session's PATH may not include ~/.local/bin, so point the
     # launcher's Exec at the absolute kast path (escape sed metacharacters in case
     # $HOME contains & | or \).
@@ -320,9 +320,9 @@ install_user_files() {
     exec_esc="$(printf '%s' "${BIN_DIR}/kast " | sed -e 's/[\\&|]/\\&/g')"
     sed -i "s|^Exec=kast |Exec=${exec_esc}|" "${DATA_HOME}/applications/kast-center.desktop"
     # GNOME Quick Settings extension — the primary UI.
-    install -D -m 644 "${ROOT_DIR}/extension/${EXT_UUID}/extension.js" "${EXT_DIR}/extension.js"
-    install -D -m 644 "${ROOT_DIR}/extension/${EXT_UUID}/prefs.js" "${EXT_DIR}/prefs.js"
-    install -D -m 644 "${ROOT_DIR}/extension/${EXT_UUID}/metadata.json" "${EXT_DIR}/metadata.json"
+    install -D -m 644 "${ROOT_DIR}/src/extension/${EXT_UUID}/extension.js" "${EXT_DIR}/extension.js"
+    install -D -m 644 "${ROOT_DIR}/src/extension/${EXT_UUID}/prefs.js" "${EXT_DIR}/prefs.js"
+    install -D -m 644 "${ROOT_DIR}/src/extension/${EXT_UUID}/metadata.json" "${EXT_DIR}/metadata.json"
 }
 
 remove_legacy_tray() {
@@ -384,11 +384,11 @@ install_youtube_receiver() {
     # The YouTube DIAL receiver is a small Node app; copy it to the data dir and
     # fetch its one dependency with npm. Best-effort — never fails the install.
     local dest="${DATA_HOME}/${APP_ID}/youtube-receiver"
-    install -D -m 644 "${ROOT_DIR}/youtube-receiver/index.mjs" "${dest}/index.mjs"
-    install -D -m 644 "${ROOT_DIR}/youtube-receiver/package.json" "${dest}/package.json"
+    install -D -m 644 "${ROOT_DIR}/src/youtube-receiver/index.mjs" "${dest}/index.mjs"
+    install -D -m 644 "${ROOT_DIR}/src/youtube-receiver/package.json" "${dest}/package.json"
     # Ship the lockfile so deps install reproducibly via `npm ci` (pinned to the
     # audited tree) rather than `npm install` (which can drift to newer versions).
-    install -D -m 644 "${ROOT_DIR}/youtube-receiver/package-lock.json" "${dest}/package-lock.json"
+    install -D -m 644 "${ROOT_DIR}/src/youtube-receiver/package-lock.json" "${dest}/package-lock.json"
     if command -v npm >/dev/null 2>&1; then
         ( cd "${dest}" && npm ci --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) \
             || PACKAGE_STATUS_NOTE="${PACKAGE_STATUS_NOTE:+${PACKAGE_STATUS_NOTE} }YouTube receiver deps failed to install (run: cd ${dest} && npm ci)."

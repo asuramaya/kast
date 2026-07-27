@@ -9,10 +9,10 @@ and the signing key never goes near CI.
 
 ## 1. Prepare
 
-Bump `VERSION` at the root. It's the one version constant (`bin/kast` and `kast-update` both
+Bump `packaging/VERSION`. It's the one version constant (`src/bin/kast` and `kast-update` both
 read it at runtime); CI asserts it matches the tag.
 
-Write the `CHANGELOG.md` entry under a `## [X.Y.Z] - YYYY-MM-DD` heading. This is not
+Write the `docs/CHANGELOG.md` entry under a `## [X.Y.Z] - YYYY-MM-DD` heading. This is not
 optional bookkeeping: the release workflow lifts that section verbatim as the release notes,
 and refuses to publish when the section is missing. Whatever you write there is what the
 world reads.
@@ -30,7 +30,7 @@ Re-vendor before releasing rather than after.
 
 ## 2. Arm, tag and publish in one sitting
 
-Arming means putting the operator's public keys into `release-signing/allowed_signers`. Once
+Arming means putting the operator's public keys into `packaging/release-signing/allowed_signers`. Once
 that file has a real line in it, verification becomes mandatory forever, for every client that
 installed from that release onward. That property is the whole point, and it's also the trap:
 
@@ -79,10 +79,10 @@ from published releases and shows anything published without a `.sig` as awaitin
 
 ## When it goes wrong
 
-**CI refuses with "no CHANGELOG.md section"** means the heading doesn't contain the version.
+**CI refuses with "no docs/CHANGELOG.md section"** means the heading doesn't contain the version.
 Add the section and re-push the tag.
 
-**The tag assertion fails** means `VERSION` and the tag disagree. Fix it, delete the tag, tag
+**The tag assertion fails** means `packaging/VERSION` and the tag disagree. Fix it, delete the tag, tag
 again.
 
 **A client reports "armed but release is unsigned"** means the release was published and never

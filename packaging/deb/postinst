@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 # kast postinst — deliberately does nothing user-facing. Every receiver is a
-# LAN listener that must stay off by default (docs/SECURITY.md), and this
+# LAN listener that must stay off by default (.github/SECURITY.md), and this
 # script runs as root during dpkg configure with no reach into any user's
 # session anyway — so "receivers stay off" holds by simple absence of code
 # here, not a guard this script has to remember to apply. No systemctl

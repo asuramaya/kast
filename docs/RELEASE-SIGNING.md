@@ -1,7 +1,7 @@
 # Release signing
 
 Status: **armed and enforcing**, as of v0.7.4 — the family's first release to
-ship able to verify itself from birth. `release-signing/allowed_signers` (and
+ship able to verify itself from birth. `packaging/release-signing/allowed_signers` (and
 its `install.sh`-embedded twin, `RELEASE_ALLOWED_SIGNERS`) hold the operator's
 4 canonical FIDO2 pubkeys; `install.sh`'s bootstrap is fail-closed: no
 `SHA256SUMS.sig`, no `ssh-keygen`, or no matching key means no install.
@@ -64,7 +64,7 @@ kast namespaces="kast-release,pills-tag" sk-ssh-ed25519@openssh.com <b64> ra-mas
 make sync-signers
 ```
 
-Rebuilds `release-signing/allowed_signers` **and** `install.sh`'s embedded
+Rebuilds `packaging/release-signing/allowed_signers` **and** `install.sh`'s embedded
 `RELEASE_ALLOWED_SIGNERS` twin from ALL 4 canonical pubkeys in
 `~/.ssh/asuramaya-master/*.pub` (the operator's own key home; override with
 `KEY_HOME=/path/to/asuramaya-master`). Always a full rebuild, never an
@@ -75,7 +75,7 @@ one at a time. Refuses to run unless it finds exactly 4 canonical keys.
 Run it ONLY in the same act as cutting the operator's first signed kast
 release — arming it any earlier bricks `kast update` against every existing
 unsigned release (see "Verification semantics" below). Until then,
-`release-signing/allowed_signers` ships empty and CI's `signing-sync` check
+`packaging/release-signing/allowed_signers` ships empty and CI's `signing-sync` check
 (`.github/workflows/signing-sync.yml`) just confirms that stays true.
 
 ## Per-release signing (operator, needs the FIDO2 key attached + a touch)
@@ -96,7 +96,7 @@ gh release upload vX.Y.Z SHA256SUMS.sig
 
 ```sh
 sha256sum -c SHA256SUMS                                   # artifact matches the manifest
-ssh-keygen -Y verify -f release-signing/allowed_signers \
+ssh-keygen -Y verify -f packaging/release-signing/allowed_signers \
   -I kast -n kast-release -s SHA256SUMS.sig \
   < SHA256SUMS                                             # manifest carries the operator's hand
 ```
@@ -132,7 +132,7 @@ no `gsettings`, no `gnome-extensions enable` — those need a real user
 session postinst can't reach as root, and it's also exactly how receivers
 stay off by default here: by absence of code, not a guard. Per-user
 activation is `kast-pill install` (mirrors coldspot's `coldspot-pill`) plus
-the existing `kast install-shortcut`. See `docs/../README.md`'s `.deb
+the existing `kast install-shortcut`. See `../README.md`'s `.deb
 Install` section for the user-facing walkthrough, and `packaging/deb/` for
 the maintainer scripts.
 
@@ -152,8 +152,8 @@ family's shared update spine, `~/code/REPOS/sutra`), and kast's was a
 one-off shell reimplementation instead (UNIFY.md Wave B convergence,
 operator-ruled, decision `f4dc3483`).
 
-`bin/kast-update` is now that thin wrapper. `kast update` (`update_run()` in
-`bin/kast`) delegates to it instead of re-running `install.sh`. The trust
+`src/bin/kast-update` is now that thin wrapper. `kast update` (`update_run()` in
+`src/bin/kast`) delegates to it instead of re-running `install.sh`. The trust
 chain itself is unchanged in substance — sha256 manifest check, then
 `ssh-keygen -Y verify` against the pinned anchor, degrade-while-unarmed /
 fail-closed-once-armed — just executed by `sutra_update.py`'s `verify_dir()`
@@ -179,7 +179,7 @@ then running the verified tarball's `install.sh` itself. The `.deb` path is
 unchanged: `sutra_update.py`'s own `dpkg -i` covers it exactly, refused
 unprivileged with the guidance above.
 
-`bin/sutra_update.py` (+ `.version`/`.commit` anchors) is vendored, never
+`src/bin/sutra_update.py` (+ `.version`/`.commit` anchors) is vendored, never
 hand-edited — `make check-sutra` is the drift guard (integrity always;
 freshness as a three-way LAG/DRIFT read against the canonical checkout when
 present, sutra decision `d51e090f`), wired into `make smoke` and CI. kast

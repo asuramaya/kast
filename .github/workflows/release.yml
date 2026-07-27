@@ -16,7 +16,7 @@ jobs:
       - name: Verify tag matches VERSION
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          file="$(tr -d '[:space:]' < VERSION)"
+          file="$(tr -d '[:space:]' < packaging/VERSION)"
           echo "tag=${tag} VERSION=${file}"
           if [ "${tag}" != "${file}" ]; then
             echo "::error::tag ${tag} does not match VERSION ${file}"
@@ -33,7 +33,7 @@ jobs:
           # tarball extracts to exactly one named directory, never bare into
           # the caller's CWD.
           git archive --format=tar.gz --prefix=kast/ -o kast.tar.gz HEAD
-          debfile="build/deb/kast_$(tr -d '[:space:]' < VERSION)_all.deb"
+          debfile="build/deb/kast_$(tr -d '[:space:]' < packaging/VERSION)_all.deb"
           cp "${debfile}" .
           cp build/deb/SHA256SUMS .
           sha256sum kast.tar.gz >> SHA256SUMS
@@ -44,7 +44,7 @@ jobs:
 
       # No signing step here, deliberately: kast-update / install.sh trust an
       # SSH signature (ssh-keygen -Y verify) against a key pinned INSIDE the
-      # client (release-signing/allowed_signers, docs/RELEASE-SIGNING.md),
+      # client (packaging/release-signing/allowed_signers, docs/RELEASE-SIGNING.md),
       # precisely so that this CI (or the GitHub account behind it) is not the
       # trust root. A secret/hardware key living in Actions secrets would let
       # anyone who compromises the account or the workflow sign whatever they
@@ -60,21 +60,21 @@ jobs:
           # Idempotent: if the release was already created by hand (e.g. with
           # release notes written ahead of the tag push), attach/replace the
           # build assets on it instead of failing on "tag already exists".
-          debfile="build/deb/kast_$(tr -d '[:space:]' < VERSION)_all.deb"
+          debfile="build/deb/kast_$(tr -d '[:space:]' < packaging/VERSION)_all.deb"
           assets=(kast.tar.gz "$(basename "${debfile}")" SHA256SUMS)
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
           else
-            # Notes come from CHANGELOG.md, never --generate-notes: a human
+            # Notes come from docs/CHANGELOG.md, never --generate-notes: a human
             # wrote that entry, and a commit dump is not release notes. If the
             # section is missing, refuse the release instead of falling back,
             # so a forgotten CHANGELOG entry is loud rather than silent.
             ver="${GITHUB_REF_NAME#v}"
             awk -v v="${ver}" 'BEGIN{f=0}
               /^## / { if (f) exit; if (index($0, v)) { f=1; print; next } }
-              f { print }' CHANGELOG.md > RELEASE_NOTES.md
+              f { print }' docs/CHANGELOG.md > RELEASE_NOTES.md
             if [ ! -s RELEASE_NOTES.md ]; then
-              echo "::error::no CHANGELOG.md section for ${ver}; add one before tagging"
+              echo "::error::no docs/CHANGELOG.md section for ${ver}; add one before tagging"
               exit 1
             fi
             gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \

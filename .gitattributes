@@ -1,6 +1,15 @@
-# Keep CI/dev-only files out of `git archive` release tarballs.
-/.github       export-ignore
+# Keep CI/dev-only files out of `git archive` release tarballs. Scoped to the
+# actual CI/dev subpaths rather than all of /.github: REPO-STANDARD.md Wave 5
+# moved CONTRIBUTING.md/SECURITY.md/CODE_OF_CONDUCT.md into .github/, and
+# those are real content the README's Map links to, not CI plumbing, so a
+# blanket /.github rule would silently drop them from every release tarball
+# (git's export-ignore, like .gitignore, never walks into an excluded
+# directory even for a later more-specific un-ignore rule, so scoping the
+# exclusion is the only fix, not an override).
+/.github/workflows export-ignore
+/.github/ISSUE_TEMPLATE export-ignore
+/.github/pull_request_template.md export-ignore
 /.gitattributes export-ignore
 /.gitignore    export-ignore
-/.shellcheckrc export-ignore
+/packaging/shellcheckrc export-ignore
 /tests         export-ignore

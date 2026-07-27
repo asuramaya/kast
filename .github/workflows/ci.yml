@@ -16,30 +16,30 @@ jobs:
 
       - name: One version constant (REPO-STANDARD.md)
         run: |
-          if grep -n 'KAST_VERSION="[0-9]' bin/kast bin/kast-update 2>/dev/null; then
-            echo "::error::a literal version string exists outside VERSION"
+          if grep -n 'KAST_VERSION="[0-9]' src/bin/kast src/bin/kast-update 2>/dev/null; then
+            echo "::error::a literal version string exists outside packaging/VERSION"
             exit 1
           fi
 
       - name: ShellCheck
-        run: shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
+        run: shellcheck --rcfile packaging/shellcheckrc install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 
       - name: Python helpers (syntax)
-        run: python3 -m py_compile bin/kast-airplay bin/kast-control-center bin/kast-update bin/sutra_update.py
+        run: python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/bin/sutra_update.py
 
       - name: Sutra vendor drift guard
         run: make check-sutra
 
       - name: Shell extension (syntax)
         run: |
-          node --check "extension/kast@asuramaya/extension.js"
-          node --check "extension/kast@asuramaya/prefs.js"
+          node --check "src/extension/kast@asuramaya/extension.js"
+          node --check "src/extension/kast@asuramaya/prefs.js"
 
       - name: Shell extension metadata (valid JSON)
-        run: python3 -c "import json; json.load(open('extension/kast@asuramaya/metadata.json'))"
+        run: python3 -c "import json; json.load(open('src/extension/kast@asuramaya/metadata.json'))"
 
       - name: man page (syntax)
-        run: groff -man -Tutf8 -ww data/man/man1/kast.1 > /dev/null
+        run: groff -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
 
       - name: CLI smoke
         run: bash tests/smoke.sh

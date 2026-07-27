@@ -3,35 +3,76 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.1] - 2026-07-27
+## [0.10.0] - 2026-07-27
 
-Wave 4 of the REPO-STANDARD.md root-tidy pass. The sharpened root rule:
-"would a stranger be surprised to find this anywhere else?", not "is this
-file important" — almost everything fails that test, which is why roots
-bloat. Pure tree moves, no logic changes, no casting/receiving/update
-behavior affected; every installed path is unchanged, only the source tree
-moved. Verified with two real install-over-installed passes in each of the
-two install layouts (source and `.deb`), including confirming `man-db`'s
-trigger still indexes the page at its unchanged installed path.
+Waves 4 and 5 of the REPO-STANDARD.md root-tidy pass, shipped together as one
+structural release (Wave 4's v0.9.1 was never tagged before Wave 5 landed on
+top of it). The operator's ruling: **the root goes superminimal, and the
+README becomes a hyperlinked map of the repo**, and the two are one decision:
+a minimal root is only safe when something else navigates, and a navigating
+README is only worth writing once the tree has stopped trying to. It also
+settles the docs-site question: **there will be no site.** GitHub renders
+markdown, links between repo files work in a browser, a clone and a
+terminal, and that is the whole documentation system. The sharpened root
+rule throughout both waves: "would a stranger be surprised to find this
+anywhere else?", not "is this file important"; almost everything fails that
+test, which is why roots bloat.
+
+Pure tree moves, no logic changes, no casting/receiving/update behavior
+affected; every installed path is unchanged, only the source tree moved.
+Verified with two real install-over-installed passes in each of the two
+install layouts (source and `.deb`), including confirming `man-db`'s trigger
+still indexes the man page at its unchanged installed path, and a full sweep
+confirming every relative link across every markdown doc resolves.
+
+### Added
+- The README gains a **Map**: a six-row navigation table near the top,
+  before Install, pointing at `docs/USAGE.md`, `.github/CONTRIBUTING.md`,
+  `docs/ARCHITECTURE.md`, `docs/RELEASING.md`, `docs/CHANGELOG.md` and
+  `.github/SECURITY.md`. The old "Where next" table at the bottom is folded
+  into it rather than duplicated.
 
 ### Changed
-- `man/kast.1` -> `data/man/man1/kast.1`. A man page is a file installed
-  onto the system as-is, the same class as everything else in `data/`.
-  Also retires a self-contradiction in the family standard (a
-  single-file-directory exception sitting on top of its own
+- `bin/`, `data/`, `extension/`, `youtube-receiver/` -> `src/`. Four
+  directories folded under one, since none of them are things a stranger
+  needs to see as separate root entries.
+- `release-signing/` -> `packaging/release-signing/`. Its repo path is only
+  ever a checkout-relative fallback (`src/bin/kast-update`'s third anchor
+  candidate); every installed client reads `/usr/share/kast/allowed_signers`
+  or `$DATA_HOME/kast/allowed_signers` instead, so the move is zero runtime
+  risk despite an earlier (mistaken) read that it was load-bearing.
+- `VERSION` -> `packaging/VERSION`. `src/bin/kast` and `kast-update`'s
+  checkout-relative fallbacks both updated for the new depth.
+- `.shellcheckrc` -> `packaging/shellcheckrc`, no longer an auto-discovered
+  dotfile, so `make check` and CI now pass `--rcfile packaging/shellcheckrc`
+  explicitly.
+- `CHANGELOG.md` -> `docs/CHANGELOG.md`, joining the other three topic docs.
+- `man/kast.1` -> `src/data/man/man1/kast.1` (Wave 4 moved it to
+  `data/man/man1/kast.1`; Wave 5's `src/` fold moved it again). A man page is
+  a file installed onto the system as-is, the same class as everything else
+  under `src/data/`. Also retires a self-contradiction in the family
+  standard (a single-file-directory exception sitting on top of its own
   no-single-file-directories rule).
-- `packages.txt` -> `packaging/packages.txt`. An install input belongs
-  beside the other install inputs, not at root.
-- `shell-extension/` -> `extension/`. Kast was the only one of six family
-  repos using the longer name; kast is the reference repo now, so the odd
-  one out moves. Source path only — the installed path
+- `packages.txt` -> `packaging/packages.txt` (Wave 4). An install input
+  belongs beside the other install inputs, not at root.
+- `shell-extension/` -> `extension/` -> `src/extension/` (Wave 4, then
+  Wave 5's fold). Kast was the only one of six family repos using the
+  longer name; kast is the reference repo now, so the odd one out moved
+  first. Source path only, both times: the installed path
   (`/usr/share/kast/extension/`) and the extension's UUID (`kast@asuramaya`)
-  are unchanged.
+  are unchanged throughout.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` -> `.github/`.
+  `.gitattributes`' export-ignore, previously a blanket rule on all of
+  `.github/`, is now scoped to just `workflows/`, `ISSUE_TEMPLATE/` and
+  `pull_request_template.md`, since a blanket rule would have silently
+  dropped these three real, README-linked files from every release tarball:
+  `git archive`'s export-ignore (like `.gitignore`) never walks into an
+  already-excluded directory even for a later, more-specific un-ignore rule.
 
-Root goes from 24 tracked entries to 22. A further move — the community
-files (`CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`) into
-`.github/` — is held pending an operator call on discoverability, and may
-land as a later release.
+Root goes from 24 tracked entries to 12: five directories answering five
+questions (`.github/`, `docs/`, `packaging/`, `src/`, `tests/`), five files a
+stranger expects (`README.md`, `LICENSE`, `Makefile`, `install.sh`,
+`uninstall.sh`), and git's two (`.gitignore`, `.gitattributes`).
 
 ## [0.9.0] - 2026-07-26
 
@@ -217,7 +258,7 @@ entry are byte-identical; an installed system sees no functional change.
 
 ### Changed
 - **License: MIT → GPLv3.** A deliberate relicense, unifying kast with the rest
-  of the asuramaya project family under GPLv3. See [LICENSE](LICENSE).
+  of the asuramaya project family under GPLv3. See [LICENSE](../LICENSE).
 - **Repo layout: `scripts/` is now `bin/`**, matching the family convention. Every
   reference moved with it (installer, CI, release workflow, tests, docs). The CLI
   still finds its helpers next to itself, so nothing else changes.

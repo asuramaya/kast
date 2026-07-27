@@ -48,10 +48,10 @@ Downloaded `yt-dlp` copies are SHA-256 verified too.
 never enters GitHub Actions in any form. This is why releases are published unsigned and
 signed afterwards by hand: if the workflow could sign, then compromising the workflow or the
 account would be enough to sign anything. See
-[docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md).
+[docs/RELEASE-SIGNING.md](../docs/RELEASE-SIGNING.md).
 
 **The trust anchor is fail-closed once armed.** As soon as
-`release-signing/allowed_signers` holds a real key, signature verification is mandatory
+`packaging/release-signing/allowed_signers` holds a real key, signature verification is mandatory
 forever for every client installed from that release onward. There is no flag to turn it off.
 
 **There is one unverifiable path, and it warns.** `install.sh` can fall back to installing
@@ -66,6 +66,6 @@ environments rather than in your system or user site-packages.
 
 ## Out of scope
 
-The apt packages in `packages.txt` are upstream-maintained. Please report issues in `uxplay`,
+The apt packages in `packaging/packages.txt` are upstream-maintained. Please report issues in `uxplay`,
 `shairport-sync`, `gnome-network-displays`, `pyatv` or `catt` to those projects; we'll help
 route a report if you're unsure where it belongs.

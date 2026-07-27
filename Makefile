@@ -1,7 +1,7 @@
 # kast — the cast demon
 .PHONY: smoke install uninstall pill sync-signers deb check-sutra check attack
 
-VERSION := $(shell tr -d '[:space:]' < VERSION)
+VERSION := $(shell tr -d '[:space:]' < packaging/VERSION)
 DEBROOT := build/deb/kast_$(VERSION)_all
 DEBFILE := build/deb/kast_$(VERSION)_all.deb
 
@@ -21,21 +21,21 @@ smoke: check-sutra
 # and exit 0; otherwise -> DRIFT, hard fail. Freshness only runs when the
 # canonical sutra checkout is present, which it normally isn't in CI.
 check-sutra:
-	@ver=$$(cut -d' ' -f1 bin/sutra_update.version); \
-	sha=$$(awk '{print $$NF}' bin/sutra_update.version); \
-	actual=$$(sha256sum bin/sutra_update.py | cut -d' ' -f1); \
+	@ver=$$(cut -d' ' -f1 src/bin/sutra_update.version); \
+	sha=$$(awk '{print $$NF}' src/bin/sutra_update.version); \
+	actual=$$(sha256sum src/bin/sutra_update.py | cut -d' ' -f1); \
 	if [ "$$sha" != "$$actual" ]; then \
-	    echo "check-sutra FAIL: bin/sutra_update.py doesn't match bin/sutra_update.version" \
-	         "(hand-edited? re-vendor: bash ~/code/REPOS/sutra/vendor.sh bin, then keep only sutra_update.*)"; \
+	    echo "check-sutra FAIL: src/bin/sutra_update.py doesn't match src/bin/sutra_update.version" \
+	         "(hand-edited? re-vendor: bash ~/code/REPOS/sutra/vendor.sh src/bin, then keep only sutra_update.*)"; \
 	    exit 1; \
 	fi; \
 	echo "check-sutra: integrity ok (sutra_update $$ver, sha256 $$sha)"; \
 	canon="$$HOME/code/REPOS/sutra"; \
 	if [ -d "$$canon/.git" ]; then \
-	    if [ ! -f bin/sutra_update.commit ]; then \
+	    if [ ! -f src/bin/sutra_update.commit ]; then \
 	        echo "check-sutra: freshness unknown (no .commit anchor, an older vendor)"; \
 	    else \
-	        recorded=$$(cat bin/sutra_update.commit); \
+	        recorded=$$(cat src/bin/sutra_update.commit); \
 	        head=$$(git -C "$$canon" rev-parse HEAD); \
 	        if [ "$$recorded" = "$$head" ]; then \
 	            echo "check-sutra: freshness ok (matches canonical HEAD $$head)"; \
@@ -53,11 +53,11 @@ check-sutra:
 # Canonical family grammar (`smoke attack check deb`): the same static checks
 # as CI's lint job, runnable locally in one shot.
 check: check-sutra
-	shellcheck install.sh uninstall.sh bin/kast bin/kast-healthcheck release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
-	python3 -m py_compile bin/kast-airplay bin/kast-control-center bin/kast-update bin/sutra_update.py
-	node --check "extension/kast@asuramaya/extension.js" "extension/kast@asuramaya/prefs.js"
-	python3 -c "import json; json.load(open('extension/kast@asuramaya/metadata.json'))"
-	groff -man -Tutf8 -ww data/man/man1/kast.1 > /dev/null
+	shellcheck --rcfile packaging/shellcheckrc install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
+	python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/bin/sutra_update.py
+	node --check "src/extension/kast@asuramaya/extension.js" "src/extension/kast@asuramaya/prefs.js"
+	python3 -c "import json; json.load(open('src/extension/kast@asuramaya/metadata.json'))"
+	groff -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
 	@echo "all static checks passed"
 
 # kast is glue with no daemon and no socket to fuzz (canonical family
@@ -67,10 +67,10 @@ check: check-sutra
 attack:
 	@echo "attack: exempt -- kast has no daemon/socket surface to fuzz (see this Makefile comment)"
 
-# rebuild release-signing/allowed_signers from the canonical keys (see
+# rebuild packaging/release-signing/allowed_signers from the canonical keys (see
 # docs/RELEASE-SIGNING.md — do NOT run casually; see the sequencing rule there)
 sync-signers:
-	bash release-signing/sync-signers.sh
+	bash packaging/release-signing/sync-signers.sh
 
 # kast has no root half: install.sh is user-scope end to end (it sudos
 # internally for apt only). Running it AS root would install into root's
@@ -97,13 +97,13 @@ uninstall:
 # the pill only ever needs your own $$HOME and gnome-shell session — never root
 pill:
 	mkdir -p $(HOME)/.local/share/gnome-shell/extensions
-	cp -r extension/kast@asuramaya $(HOME)/.local/share/gnome-shell/extensions/
+	cp -r src/extension/kast@asuramaya $(HOME)/.local/share/gnome-shell/extensions/
 	@echo "pill installed — now: gnome-extensions enable kast@asuramaya"
 	@echo "then log out and back in once (Wayland reloads extensions at login)"
 
 # .deb: shared/inert files under /usr only. Every ACTIVATION (the pill,
 # the Super+K shortcut, a receiver's first enable) stays exactly as per-user
-# as the checkout path above — see packaging/deb/postinst and bin/kast-pill.
+# as the checkout path above — see packaging/deb/postinst and src/bin/kast-pill.
 # Builds only; never installs the result (see tests/smoke.sh's deb check).
 deb:
 	rm -rf $(DEBROOT)
@@ -115,32 +115,32 @@ deb:
 	install -d -m 0755 $(DEBROOT)/usr/share/applications
 	install -d -m 0755 $(DEBROOT)/usr/lib/systemd/user
 	install -d -m 0755 $(DEBROOT)/usr/share/man/man1
-	install -m 0755 bin/kast bin/kast-airplay bin/kast-control-center \
-	    bin/kast-healthcheck bin/kast-update bin/kast-pill $(DEBROOT)/usr/bin/
+	install -m 0755 src/bin/kast src/bin/kast-airplay src/bin/kast-control-center \
+	    src/bin/kast-healthcheck src/bin/kast-update src/bin/kast-pill $(DEBROOT)/usr/bin/
 	# kast-update's engine: the family's shared update spine (Wave B
 	# convergence, docs/RELEASE-SIGNING.md) — same sibling-import layout as
 	# the source install, never hand-edited, re-vendored via sutra's vendor.sh.
-	install -m 0644 bin/sutra_update.py bin/sutra_update.version $(DEBROOT)/usr/bin/
-	if [ -f bin/sutra_update.commit ]; then \
-	    install -m 0644 bin/sutra_update.commit $(DEBROOT)/usr/bin/; \
+	install -m 0644 src/bin/sutra_update.py src/bin/sutra_update.version $(DEBROOT)/usr/bin/
+	if [ -f src/bin/sutra_update.commit ]; then \
+	    install -m 0644 src/bin/sutra_update.commit $(DEBROOT)/usr/bin/; \
 	fi
-	install -m 0644 VERSION $(DEBROOT)/usr/share/kast/VERSION
-	install -m 0644 release-signing/allowed_signers $(DEBROOT)/usr/share/kast/allowed_signers
-	install -m 0644 data/man/man1/kast.1 $(DEBROOT)/usr/share/man/man1/kast.1
-	install -m 0644 data/config/uxplay.conf.example $(DEBROOT)/usr/share/kast/uxplay.conf.example
-	install -m 0644 extension/kast@asuramaya/extension.js \
-	    extension/kast@asuramaya/prefs.js \
-	    extension/kast@asuramaya/metadata.json \
+	install -m 0644 packaging/VERSION $(DEBROOT)/usr/share/kast/VERSION
+	install -m 0644 packaging/release-signing/allowed_signers $(DEBROOT)/usr/share/kast/allowed_signers
+	install -m 0644 src/data/man/man1/kast.1 $(DEBROOT)/usr/share/man/man1/kast.1
+	install -m 0644 src/data/config/uxplay.conf.example $(DEBROOT)/usr/share/kast/uxplay.conf.example
+	install -m 0644 src/extension/kast@asuramaya/extension.js \
+	    src/extension/kast@asuramaya/prefs.js \
+	    src/extension/kast@asuramaya/metadata.json \
 	    $(DEBROOT)/usr/share/kast/extension/kast@asuramaya/
 	sed 's#@DAEMON_BIN@#/usr/bin/gnome-network-displays-daemon#' \
-	    data/dbus/org.gnome.NetworkDisplays.Daemon.service \
+	    src/data/dbus/org.gnome.NetworkDisplays.Daemon.service \
 	    > $(DEBROOT)/usr/share/dbus-1/services/org.gnome.NetworkDisplays.Daemon.service
-	install -m 0644 data/config/pipewire/50-raop.conf $(DEBROOT)/usr/share/pipewire/pipewire.conf.d/50-raop.conf
-	install -m 0644 data/applications/kast-center.desktop $(DEBROOT)/usr/share/applications/kast-center.desktop
+	install -m 0644 src/data/config/pipewire/50-raop.conf $(DEBROOT)/usr/share/pipewire/pipewire.conf.d/50-raop.conf
+	install -m 0644 src/data/applications/kast-center.desktop $(DEBROOT)/usr/share/applications/kast-center.desktop
 	for u in uxplay shairport-sync kast-youtube kast-update; do \
-	    install -m 0644 data/systemd/user/$$u.service $(DEBROOT)/usr/lib/systemd/user/$$u.service; \
+	    install -m 0644 src/data/systemd/user/$$u.service $(DEBROOT)/usr/lib/systemd/user/$$u.service; \
 	done
-	install -m 0644 data/systemd/user/kast-update.timer $(DEBROOT)/usr/lib/systemd/user/kast-update.timer
+	install -m 0644 src/data/systemd/user/kast-update.timer $(DEBROOT)/usr/lib/systemd/user/kast-update.timer
 	install -m 0755 packaging/deb/postinst $(DEBROOT)/DEBIAN/postinst
 	install -m 0755 packaging/deb/prerm $(DEBROOT)/DEBIAN/prerm
 	install -m 0755 packaging/deb/postrm $(DEBROOT)/DEBIAN/postrm

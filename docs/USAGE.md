@@ -170,7 +170,7 @@ casting drops Wi-Fi by default.
 
 It writes `~/.config/kast/uxplay.conf`, which is the same file the CLI reads. You can edit
 that file directly; start from
-[data/config/uxplay.conf.example](../data/config/uxplay.conf.example). It's sourced like a
+[src/data/config/uxplay.conf.example](../src/data/config/uxplay.conf.example). It's sourced like a
 shell rc file, so treat it as code you own. The preferences dialog escapes everything it
 writes there.
 

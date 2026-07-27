@@ -33,6 +33,17 @@ authentication, and the only Linux sender runs extracted Apple code.
 party cannot obtain. <sup>2</sup> MiracleCast is the only Linux implementation. It's
 unreliable, and it wants the Wi-Fi radio to itself.
 
+## Map
+
+| | |
+|---|---|
+| Use it | [docs/USAGE.md](docs/USAGE.md), or `man kast` |
+| Change it | [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) |
+| Understand how it's built | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Cut a release | [docs/RELEASING.md](docs/RELEASING.md) |
+| See what changed | [docs/CHANGELOG.md](docs/CHANGELOG.md) |
+| Report a vulnerability | [.github/SECURITY.md](.github/SECURITY.md) |
+
 ## Install
 
 ```bash
@@ -119,18 +130,7 @@ Kast runs entirely in your user session. There is no privileged daemon.
 * Discovered device names are attacker-controlled, and they only ever get handled as text.
 
 The full threat model, and how to report a vulnerability privately, is in
-[SECURITY.md](SECURITY.md).
-
-## Where next
-
-| | |
-|---|---|
-| [docs/USAGE.md](docs/USAGE.md) | every command, the tile, preferences, troubleshooting |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how Kast is put together, and where each file lives |
-| [docs/RELEASING.md](docs/RELEASING.md) | how a version becomes a sealed release |
-| [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md) | the release trust chain |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | dev setup, and the checks CI runs |
-| [CHANGELOG.md](CHANGELOG.md) | what changed, and when |
+[.github/SECURITY.md](.github/SECURITY.md).
 
 Kast belongs to a family of small GNOME utilities that share a runtime backbone, an update
 spine and a signed-release chain. GPLv3.

@@ -46,18 +46,21 @@ PILL = "kast"
 REPO_SLUG = "asuramaya/kast"
 _SELF_DIR = os.path.dirname(os.path.abspath(__file__))
 _SRC_DIR = os.path.dirname(_SELF_DIR)
+# _SELF_DIR is src/bin/ in a checkout, so the checkout root is one level
+# further up than _SRC_DIR (src/) — REPO-STANDARD.md Wave 5's src/ move.
+_REPO_ROOT = os.path.dirname(_SRC_DIR)
 DATA_HOME = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
 ANCHOR_CANDIDATES = (
     "/usr/share/kast/allowed_signers",              # .deb layout
     os.path.join(DATA_HOME, "kast", "allowed_signers"),  # source install (persistent copy)
-    os.path.join(_SRC_DIR, "release-signing", "allowed_signers"),  # run from a checkout
+    os.path.join(_REPO_ROOT, "packaging", "release-signing", "allowed_signers"),  # run from a checkout
 )
 # VERSION is the one version constant (REPO-STANDARD.md) — same three-layout
 # candidate order as the anchor above.
 VERSION_CANDIDATES = (
     "/usr/share/kast/VERSION",
     os.path.join(DATA_HOME, "kast", "VERSION"),
-    os.path.join(_SRC_DIR, "VERSION"),
+    os.path.join(_REPO_ROOT, "packaging", "VERSION"),
 )
 
 

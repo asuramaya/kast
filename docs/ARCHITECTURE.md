@@ -11,7 +11,7 @@ discoverable lives in avahi's cache. What's running lives in `systemctl --user`.
 casting lives inside `gnome-network-displays`. Kast queries those, arranges the answers, and
 gets out of the way.
 
-That makes the CLI the centre of gravity. `bin/kast` is bash, it's the source of truth for
+That makes the CLI the centre of gravity. `src/bin/kast` is bash, it's the source of truth for
 behaviour, and everything else calls it:
 
 ```
@@ -60,27 +60,34 @@ snapshot is absent; the menu just goes back to being slow.
 
 ## Where everything lives
 
+`src/` is the one row that groups four directories rather than naming one thing: `bin/`,
+`data/`, `extension/` and `youtube-receiver/` all live under it, so this map matters more than
+it used to, since the root listing no longer shows them individually.
+
 | Path | What it is |
 |---|---|
-| `bin/kast` | the CLI, in bash. The source of truth, and the integration point for everything else |
-| `bin/kast-airplay` | Python helper driving `pyatv`, for AirPlay video out and device control |
-| `bin/kast-control-center` | the GTK4/Adwaita remote window |
-| `bin/kast-pill` | per-user activation for `.deb` installs, `install` and `remove` |
-| `bin/kast-update` | the engine behind `kast update`, a thin wrapper over the vendored spine |
-| `bin/kast-healthcheck` | CLI parity with the family: does the status.json seam agree with live systemd reality. Not wired into any timer; kast has no daemon to check periodically |
-| `bin/sutra_update.py` | the family's shared update spine, vendored byte-identical from `sutra` |
-| `bin/sutra_update.version`, `.commit` | drift anchors for the vendored copy |
-| `extension/kast@asuramaya/` | the GNOME pill: `extension.js` is the tile, `prefs.js` the settings dialog |
-| `data/` | files installed onto the system as-is: `systemd/user/` (the three off-by-default receiver units, plus the update service and timer), `config/` (the PipeWire RAOP drop-in, the `uxplay.conf` example), `applications/` (the desktop entry that opens the picker), `dbus/` (the activation file that starts the gnome-network-displays daemon on demand), `man/man1/kast.1` (the man page: every verb, kept in sync with `docs/USAGE.md` by hand, same as every sibling pill's) |
-| `youtube-receiver/` | a separate Node runtime, the DIAL receiver built on `yt-cast-receiver` |
+| `src/bin/kast` | the CLI, in bash. The source of truth, and the integration point for everything else |
+| `src/bin/kast-airplay` | Python helper driving `pyatv`, for AirPlay video out and device control |
+| `src/bin/kast-control-center` | the GTK4/Adwaita remote window |
+| `src/bin/kast-pill` | per-user activation for `.deb` installs, `install` and `remove` |
+| `src/bin/kast-update` | the engine behind `kast update`, a thin wrapper over the vendored spine |
+| `src/bin/kast-healthcheck` | CLI parity with the family: does the status.json seam agree with live systemd reality. Not wired into any timer; kast has no daemon to check periodically |
+| `src/bin/sutra_update.py` | the family's shared update spine, vendored byte-identical from `sutra` |
+| `src/bin/sutra_update.version`, `.commit` | drift anchors for the vendored copy |
+| `src/extension/kast@asuramaya/` | the GNOME pill: `extension.js` is the tile, `prefs.js` the settings dialog |
+| `src/data/` | files installed onto the system as-is: `systemd/user/` (the three off-by-default receiver units, plus the update service and timer), `config/` (the PipeWire RAOP drop-in, the `uxplay.conf` example), `applications/` (the desktop entry that opens the picker), `dbus/` (the activation file that starts the gnome-network-displays daemon on demand), `man/man1/kast.1` (the man page: every verb, kept in sync with `docs/USAGE.md` by hand, same as every sibling pill's) |
+| `src/youtube-receiver/` | a separate Node runtime, the DIAL receiver built on `yt-cast-receiver` |
 | `packaging/deb/` | `.deb` maintainer scripts. `make deb` builds one and never installs it |
 | `packaging/packages.txt` | the apt packages the installer needs, one per line with comments |
-| `release-signing/allowed_signers` | the trust anchor for release verification |
-| `release-signing/sync-signers.sh` | rebuilds that anchor from the canonical public keys |
+| `packaging/release-signing/allowed_signers` | the trust anchor for release verification |
+| `packaging/release-signing/sync-signers.sh` | rebuilds that anchor from the canonical public keys |
+| `packaging/VERSION` | the one version constant (REPO-STANDARD.md); `src/bin/kast` and `kast-update` read it at runtime |
+| `packaging/shellcheckrc` | shellcheck's rule exceptions; passed explicitly via `--rcfile` since it's no longer an auto-discovered dotfile |
+| `docs/CHANGELOG.md` | what changed, and when |
 | `tests/` | `smoke.sh` and `test_signing.sh` |
 | `install.sh`, `uninstall.sh` | the user-scope installer and its symmetric removal |
 
-`youtube-receiver/` is the one piece written in another language, and it's here because the
+`src/youtube-receiver/` is the one piece written in another language, and it's here because the
 only maintained DIAL receiver for YouTube is a Node library. It runs as its own user service,
 speaks to `mpv`, and touches nothing else in the tree. Its `node_modules` are installed on the
 target machine rather than committed.
@@ -102,18 +109,18 @@ Removing the package cleans `/usr` but leaves those per-account copies, which is
 The two must not be mixed on one machine, and `kast update` refuses to run the tarball
 installer over a `.deb` install rather than making a mess of it.
 
-Both layouts have to ship the full vendored set from `bin/`. Shipping the executables while
+Both layouts have to ship the full vendored set from `src/bin/`. Shipping the executables while
 forgetting `sutra_update.py` produces an install that works until the first update and then
 dies on an import, which is a mistake this family has made more than once.
 
-`VERSION` ships the same way, as a persistent runtime file next to the install
+`packaging/VERSION` ships the same way, as a persistent runtime file next to the install
 (`/usr/share/kast/VERSION` for the `.deb`, `~/.local/share/kast/VERSION` for a source
-install), so `bin/kast` and `kast-update` can read it after the fact rather than carry their
+install), so `src/bin/kast` and `kast-update` can read it after the fact rather than carry their
 own copy of the number.
 
 ## The update path
 
-`kast update` runs `bin/kast-update`, which is a thin wrapper over `bin/sutra_update.py`. That
+`kast update` runs `src/bin/kast-update`, which is a thin wrapper over `src/bin/sutra_update.py`. That
 file is vendored byte-identical from the `sutra` repo, and `make check-sutra` proves it:
 integrity is a hard failure, while freshness is three-way. A vendored commit that matches
 canonical HEAD is fine, an ancestor of HEAD is lag and warns, and anything not in canonical's
@@ -134,7 +141,7 @@ process is in [RELEASING.md](RELEASING.md).
 ## Conventions worth knowing before you edit
 
 * Bash runs under `set -euo pipefail` and stays ShellCheck-clean. Intentional exceptions live
-  in `.shellcheckrc`, not in inline comments.
+  in `packaging/shellcheckrc`, not in inline comments.
 * New runtime dependencies stay out unless Ubuntu already ships them. The pipx-isolated
   helpers are the exception, and they're isolated for exactly that reason.
 * The CLI is the integration point. If the tile needs something, the CLI grows a `--json`
@@ -153,4 +160,4 @@ Kast doesn't have is listed here. A gap that isn't in this table is a bug, not a
 |---|---|
 | no daemon, and no vendored `sutra.py` | Kast is the family's glue layer. It has no daemon, so the shared `ControlServer` runtime doesn't apply. It vendors `sutra_update.py` alone, which is standalone and stdlib-only |
 | no `tests/attack.sh` | there's no daemon and no socket surface of its own to fuzz. The inbound receivers are upstream programs, and hardening them belongs upstream. `make attack` exists and says so rather than being silently absent |
-| `youtube-receiver/` as a second runtime | the only maintained DIAL receiver for YouTube is a Node library. Documented above, and confined to its own directory |
+| `src/youtube-receiver/` as a second runtime | the only maintained DIAL receiver for YouTube is a Node library. Documented above, and confined to its own directory |

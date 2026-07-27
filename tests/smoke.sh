@@ -7,7 +7,7 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-KAST=(bash "${ROOT_DIR}/bin/kast")
+KAST=(bash "${ROOT_DIR}/src/bin/kast")
 
 # Sandbox all reads/writes into a temp XDG tree.
 TMP_HOME="$(mktemp -d)"
@@ -60,7 +60,7 @@ printf 'kast smoke tests\n'
 
 # --- basic surface ---
 expect_ok    "version"                       "${KAST[@]}" version
-expect_grep  "version matches VERSION file"  "$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION")" "${KAST[@]}" version
+expect_grep  "version matches VERSION file"  "$(tr -d '[:space:]' < "${ROOT_DIR}/packaging/VERSION")" "${KAST[@]}" version
 expect_grep  "--help lists airplay-cast"      "airplay-cast" "${KAST[@]}" --help
 expect_grep  "--help documents --scan"        "--scan" "${KAST[@]}" --help
 expect_grep  "--help documents update --check" "update \[--check" "${KAST[@]}" --help
@@ -101,7 +101,7 @@ expect_fail  "set-mode rejects bad mode"     "${KAST[@]}" set-mode bogus
 # Builds and inspects only — never installed (that's a human's `dpkg -i`).
 if command -v dpkg-deb >/dev/null 2>&1; then
     if make -C "${ROOT_DIR}" deb >/tmp/kast-deb-build.log 2>&1; then
-        DEBFILE="${ROOT_DIR}/build/deb/kast_$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION")_all.deb"
+        DEBFILE="${ROOT_DIR}/build/deb/kast_$(tr -d '[:space:]' < "${ROOT_DIR}/packaging/VERSION")_all.deb"
         if [[ -f "${DEBFILE}" ]]; then
             CONTENTS="$(dpkg-deb --contents "${DEBFILE}")"
             deb_ok=1
