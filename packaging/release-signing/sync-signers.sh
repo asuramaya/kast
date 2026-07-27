@@ -20,7 +20,11 @@
 # release-signing/allowed_signers any earlier bricks kast-update against
 # every existing unsigned release.
 set -euo pipefail
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)"
+# Two levels up: this script lives at packaging/release-signing/, not
+# release-signing/ directly under the repo root (REPO-STANDARD.md Wave 5's
+# packaging/ fold) — depth-relative logic like this is silent when it
+# breaks, so fix this again if the script ever moves deeper still.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2>/dev/null && pwd)"
 PRINCIPAL="kast"
 NAMESPACES="kast-release,pills-tag"
 
@@ -38,7 +42,7 @@ if [[ "${#pubs[@]}" -ne 4 ]]; then
   exit 1
 fi
 
-anchor="$HERE/release-signing/allowed_signers"
+anchor="$HERE/packaging/release-signing/allowed_signers"
 tmp="$(mktemp)"
 for p in "${pubs[@]}"; do
   printf '%s namespaces="%s" %s\n' "$PRINCIPAL" "$NAMESPACES" "$(cat "$p")"
