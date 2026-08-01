@@ -3,6 +3,51 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-01
+
+Five patches on top of the sealed v0.10.1, all structural: closes the gaps the
+family's REPO-STANDARD.md/sutra convergence effort found in kast specifically.
+None of them change what kast does for a user already running it.
+
+### Added
+
+- **`make check-repo`**: kast's structure gate against REPO-STANDARD.md —
+  required root files, man page presence, the root row count, README's
+  `## Map` block, `packaging/VERSION` as the sole version source, `release.yml`
+  on `--notes-file`, no untracked `docs/*.md`, no `*-SPEC.md`, the Standard
+  exemptions table's column count. Wired into CI as the first step, replacing
+  the old narrow "one version constant" grep.
+- **`kast-healthcheck` now verifies the installed `sutra_update.py` against its
+  own installed anchor**, not just the repo tree's copy (ruling `3e44bd95`
+  item 5) — a hand-edited or two-pills-collided installed copy now fails
+  loudly instead of silently mismatching only `make check-sutra`'s repo-tree
+  view. A missing anchor reports "unknown", not "failed": a fresh install
+  racing the first update isn't a defect.
+
+### Changed
+
+- **The vendored `sutra_update.py` moved out of the shared bin dir into a
+  private per-pill directory**: `src/share/kast/lib/` in the checkout,
+  `/usr/share/kast/lib/` for the `.deb`, `${DATA_HOME}/kast/lib/` for a source
+  install (was `src/bin/`, `/usr/bin`, `${BIN_DIR}`). Every pill vendoring the
+  same filename into one shared directory made two pills mutually
+  uninstallable; `install.sh` now also cleans up the pre-migration location on
+  every install/update.
+- **Adopted the family's shared `sutra.mk` 0.11.1 recipe layer and
+  `pill-ci.yml` reusable CI workflow**, replacing kast's hand-written
+  `check-sutra` target and restructuring CI into a `shared` job (the family's
+  common checks) plus a `kast-specific` sibling (the checkout-run resolution
+  guard, and `prefs.js` syntax checking — kast's second GNOME extension entry
+  point, which the shared workflow doesn't cover).
+
+### Removed
+
+- A dangling `.gitattributes` line for `packaging/shellcheckrc`, deleted at
+  v0.10.1 but left referenced.
+
+Nothing that ships changes behaviour for a user already running kast; the next
+`kast update` picks up the relocated files and the new healthcheck output.
+
 ## [0.10.1] - 2026-07-27
 
 Fixes the lint invocation that v0.10.0 shipped broken.
