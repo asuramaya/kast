@@ -14,12 +14,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: One version constant (REPO-STANDARD.md)
-        run: |
-          if grep -n 'KAST_VERSION="[0-9]' src/bin/kast src/bin/kast-update 2>/dev/null; then
-            echo "::error::a literal version string exists outside packaging/VERSION"
-            exit 1
-          fi
+      # First, before anything below can create a build/dist artifact that
+      # would otherwise trip the row-count check for the wrong reason
+      # (REPO-STANDARD.md: order the structure gate before any build step,
+      # not just exclude gitignored paths from the count). Subsumes the old
+      # narrow "one version constant" grep — check-repo's version check
+      # covers every binary and the extension, not just two files.
+      - name: Repo structure gate (REPO-STANDARD.md)
+        run: make check-repo
 
       - name: ShellCheck
         # -e rather than --rcfile: the flag only exists from shellcheck 0.11.0
@@ -42,7 +44,10 @@ jobs:
         run: python3 -c "import json; json.load(open('src/extension/kast@asuramaya/metadata.json'))"
 
       - name: man page (syntax)
-        run: groff -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
+        # -t -k, not just -Tutf8 -ww: the bare form exits 0 while silently
+        # skipping the table and UTF-8 preprocessor passes, so a malformed
+        # table would render clean. Family-wide hardening (Alfred, msg 1628).
+        run: groff -t -k -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
 
       - name: CLI smoke
         run: bash tests/smoke.sh

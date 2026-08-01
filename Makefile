@@ -1,5 +1,5 @@
 # kast — the cast demon
-.PHONY: smoke install uninstall pill sync-signers deb check-sutra check attack
+.PHONY: smoke install uninstall pill sync-signers deb check-sutra check-repo check attack
 
 VERSION := $(shell tr -d '[:space:]' < packaging/VERSION)
 DEBROOT := build/deb/kast_$(VERSION)_all
@@ -50,6 +50,60 @@ check-sutra:
 	    echo "check-sutra: canonical sutra checkout not present, freshness skipped"; \
 	fi
 
+# Mechanical proof that kast still meets REPO-STANDARD.md, the standard it
+# was chosen to exemplify (Alfred msg 1724: kast was the only converged pill
+# with no such gate — everything Waves 4/5 built was held in place by nobody
+# having touched it since, not by anything that could catch drift). Modelled
+# on coldspot's check-repo, the family's reference shape.
+check-repo:
+	@fail=0; \
+	for f in README.md LICENSE Makefile install.sh uninstall.sh .gitignore .gitattributes \
+	         docs/USAGE.md docs/ARCHITECTURE.md docs/RELEASING.md; do \
+	    if [ ! -e "$$f" ]; then echo "check-repo FAIL: missing $$f"; fail=1; fi; \
+	done; \
+	if [ ! -e src/data/man/man1/kast.1 ]; then \
+	    echo "check-repo FAIL: no src/data/man/man1/kast.1"; fail=1; \
+	fi; \
+	rows=$$(git ls-files | cut -d/ -f1 | sort -u | wc -l); \
+	if [ "$$rows" -gt 12 ]; then \
+	    echo "check-repo FAIL: root has $$rows rows, standard caps it at 12"; fail=1; \
+	else \
+	    echo "check-repo: root row count ok ($$rows)"; \
+	fi; \
+	if ! grep -q '^## Map' README.md 2>/dev/null; then \
+	    echo "check-repo FAIL: README.md has no navigation block (## Map)"; fail=1; \
+	fi; \
+	for h in Troubleshooting "Repo Layout"; do \
+	    if grep -q "^## $$h" README.md 2>/dev/null; then \
+	        echo "check-repo FAIL: README.md carries a post-install heading ('$$h') that belongs in docs/USAGE.md"; fail=1; \
+	    fi; \
+	done; \
+	if [ ! -f packaging/VERSION ]; then \
+	    echo "check-repo FAIL: no packaging/VERSION"; fail=1; \
+	fi; \
+	if grep -rn "VERSION[[:space:]]*=[[:space:]]*['\"][0-9]" \
+	    src/bin/kast src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-healthcheck \
+	    src/bin/kast-update src/bin/kast-pill install.sh uninstall.sh \
+	    src/extension/kast@asuramaya/extension.js src/extension/kast@asuramaya/prefs.js 2>/dev/null; then \
+	    echo "check-repo FAIL: a literal version string exists outside packaging/VERSION"; fail=1; \
+	fi; \
+	if grep -v '^[[:space:]]*#' .github/workflows/release.yml 2>/dev/null | grep -q -- '--generate-notes'; then \
+	    echo "check-repo FAIL: release.yml still uses --generate-notes, not --notes-file"; fail=1; \
+	fi; \
+	stray=$$(find docs -name '*.md' -not -path '*/.*' | while read -r f; do git ls-files --error-unmatch "$$f" >/dev/null 2>&1 || echo "$$f"; done); \
+	if [ -n "$$stray" ]; then \
+	    echo "check-repo FAIL: untracked *.md under docs/: $$stray"; fail=1; \
+	fi; \
+	spec=$$(find . -name '*-SPEC.md' -not -path './.git/*'); \
+	if [ -n "$$spec" ]; then \
+	    echo "check-repo FAIL: *-SPEC.md left in the repo (specs belong in the seat's office): $$spec"; fail=1; \
+	fi; \
+	if [ -f docs/ARCHITECTURE.md ] && grep -q '^## Standard exemptions' docs/ARCHITECTURE.md; then \
+	    bad=$$(awk '/^## Standard exemptions/{f=1;next} f && /^\|/ && !/^\| *Item *\|/ && !/^\|---/{ n=gsub(/\|/,"|"); if (n<3) print }' docs/ARCHITECTURE.md); \
+	    if [ -n "$$bad" ]; then echo "check-repo FAIL: exemptions table has a row missing a column"; fail=1; fi; \
+	fi; \
+	if [ "$$fail" -eq 0 ]; then echo "check-repo: all mechanical checks passed"; else exit 1; fi
+
 # Canonical family grammar (`smoke attack check deb`): the same static checks
 # as CI's lint job, runnable locally in one shot.
 # Exclusions are passed as flags, not via an rc file: shellcheck only grew
@@ -66,7 +120,7 @@ check: check-sutra
 	python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/bin/sutra_update.py
 	node --check "src/extension/kast@asuramaya/extension.js" "src/extension/kast@asuramaya/prefs.js"
 	python3 -c "import json; json.load(open('src/extension/kast@asuramaya/metadata.json'))"
-	groff -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
+	groff -t -k -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
 	@echo "all static checks passed"
 
 # kast is glue with no daemon and no socket to fuzz (canonical family
