@@ -4,9 +4,15 @@
 # kast-healthcheck — CLI parity with the family; kast has no daemon to ping
 # (docs/STATUS-SEAM.md: kast is the family's one exempt glue layer), so the
 # verdict here is instead: the status.json seam, when one exists, agrees
-# with live systemd reality. No seam yet is not unhealthy — kast only writes
-# one as a by-product of a verb actually running, and nothing has run since
-# boot is a normal state for a tool with no background service.
+# with live systemd reality, AND the installed sutra_update.py still matches
+# its own installed .version anchor (BOOTSTRAP.md, ruling 3e44bd95 item 5) —
+# `make check-sutra` only ever proves the repo copy wasn't hand-edited; it
+# says nothing about what a real install is actually running. kast ships
+# the update spine itself, so a silently-wrong installed copy here has the
+# widest blast radius of any vendored module: it's what runs on every future
+# `kast update`. No seam yet is not unhealthy — kast only writes one as a
+# by-product of a verb actually running, and nothing has run since boot is
+# a normal state for a tool with no background service.
 #
 # Exit 0 (healthy) or 1 (unhealthy) + one line, passive — this only reports,
 # it never restarts or repairs anything (that's `kast repair`, on request).
@@ -23,12 +29,34 @@ fail() {
 
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 
+# Derived the SAME way kast-update's own bootstrap preamble derives it
+# (dirname(dirname(realpath(self)))/share/kast/lib) — this binary is
+# installed beside kast-update in every layout, so the arithmetic lands on
+# the exact directory kast-update actually imports from.
+sutra_note="sutra anchor unknown"
+_self="$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]:-$0}")"
+_sutra_libdir="$(dirname "$(dirname "${_self}")")/share/kast/lib"
+_sutra_py="${_sutra_libdir}/sutra_update.py"
+_sutra_version="${_sutra_libdir}/sutra_update.version"
+# A missing anchor (an install that predates it, or a layout that never
+# shipped one) is a DIFFERENT fact from a verified mismatch — collapsing
+# both into "fail" would hide a real tamper behind ordinary version skew,
+# so "cannot check" only ever becomes a note, never a failure by itself.
+if [[ -f "${_sutra_version}" && -f "${_sutra_py}" ]]; then
+    _sutra_expected="$(awk '{print $NF}' "${_sutra_version}")"
+    _sutra_actual="$(sha256sum "${_sutra_py}" | cut -d' ' -f1)"
+    if [[ "${_sutra_expected}" != "${_sutra_actual}" ]]; then
+        fail "installed ${_sutra_py} doesn't match its own installed sutra_update.version anchor (hand-edited, or two pills' installers collided)"
+    fi
+    sutra_note="sutra anchor ok"
+fi
+
 live_state() {
     systemctl --user is-active --quiet "$1" 2>/dev/null && printf 'active' || printf 'inactive'
 }
 
 if [[ ! -f "${SEAM_FILE}" ]]; then
-    printf 'kast-healthcheck: ok (no status.json seam yet — kast has no daemon, so nothing has needed to write one)\n'
+    printf 'kast-healthcheck: ok (no status.json seam yet — kast has no daemon, so nothing has needed to write one; %s)\n' "${sutra_note}"
     exit 0
 fi
 
@@ -50,4 +78,4 @@ done
 [[ -z "${drift}" ]] || fail "seam drifted from systemd (${drift}) — re-run any kast verb to refresh"
 
 age=$(( $(date +%s) - $(jq -r '.written_at // 0' <<<"${seam}") ))
-printf 'kast-healthcheck: ok (seam %ds old, receivers match systemd)\n' "${age}"
+printf 'kast-healthcheck: ok (seam %ds old, receivers match systemd, %s)\n' "${age}" "${sutra_note}"
