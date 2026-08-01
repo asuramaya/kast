@@ -179,9 +179,12 @@ then running the verified tarball's `install.sh` itself. The `.deb` path is
 unchanged: `sutra_update.py`'s own `dpkg -i` covers it exactly, refused
 unprivileged with the guidance above.
 
-`src/bin/sutra_update.py` (+ `.version`/`.commit` anchors) is vendored, never
+`src/share/kast/lib/sutra_update.py` (+ `.version`/`.commit` anchors) is vendored, never
 hand-edited — `make check-sutra` is the drift guard (integrity always;
 freshness as a three-way LAG/DRIFT read against the canonical checkout when
 present, sutra decision `d51e090f`), wired into `make smoke` and CI. kast
 vendors only `sutra_update.py` — no daemon, so `sutra.py`/`sutra_xen.py`
-would be dead code (ship-what-you-import).
+would be dead code (ship-what-you-import). It lives in a private per-pill
+directory rather than beside the binaries, so its identically-named copy in
+another pill can't collide with kast's on a machine with more than one pill
+installed (ruling `3e44bd95`, `~/code/REPOS/sutra/BOOTSTRAP.md`).

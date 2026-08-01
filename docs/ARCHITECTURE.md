@@ -60,9 +60,9 @@ snapshot is absent; the menu just goes back to being slow.
 
 ## Where everything lives
 
-`src/` is the one row that groups four directories rather than naming one thing: `bin/`,
-`data/`, `extension/` and `youtube-receiver/` all live under it, so this map matters more than
-it used to, since the root listing no longer shows them individually.
+`src/` is the one row that groups five directories rather than naming one thing: `bin/`,
+`data/`, `extension/`, `share/` and `youtube-receiver/` all live under it, so this map matters
+more than it used to, since the root listing no longer shows them individually.
 
 | Path | What it is |
 |---|---|
@@ -72,8 +72,8 @@ it used to, since the root listing no longer shows them individually.
 | `src/bin/kast-pill` | per-user activation for `.deb` installs, `install` and `remove` |
 | `src/bin/kast-update` | the engine behind `kast update`, a thin wrapper over the vendored spine |
 | `src/bin/kast-healthcheck` | CLI parity with the family: does the status.json seam agree with live systemd reality. Not wired into any timer; kast has no daemon to check periodically |
-| `src/bin/sutra_update.py` | the family's shared update spine, vendored byte-identical from `sutra` |
-| `src/bin/sutra_update.version`, `.commit` | drift anchors for the vendored copy |
+| `src/share/kast/lib/sutra_update.py` | the family's shared update spine, vendored byte-identical from `sutra`. Lives in a private per-pill dir, not beside the binaries, so two pills' identically-named copies can't collide in a shared bin dir (ruling `3e44bd95`) |
+| `src/share/kast/lib/sutra_update.version`, `.commit` | drift anchors for the vendored copy |
 | `src/extension/kast@asuramaya/` | the GNOME pill: `extension.js` is the tile, `prefs.js` the settings dialog |
 | `src/data/` | files installed onto the system as-is: `systemd/user/` (the three off-by-default receiver units, plus the update service and timer), `config/` (the PipeWire RAOP drop-in, the `uxplay.conf` example), `applications/` (the desktop entry that opens the picker), `dbus/` (the activation file that starts the gnome-network-displays daemon on demand), `man/man1/kast.1` (the man page: every verb, kept in sync with `docs/USAGE.md` by hand, same as every sibling pill's) |
 | `src/youtube-receiver/` | a separate Node runtime, the DIAL receiver built on `yt-cast-receiver` |
@@ -82,7 +82,6 @@ it used to, since the root listing no longer shows them individually.
 | `packaging/release-signing/allowed_signers` | the trust anchor for release verification |
 | `packaging/release-signing/sync-signers.sh` | rebuilds that anchor from the canonical public keys |
 | `packaging/VERSION` | the one version constant (REPO-STANDARD.md); `src/bin/kast` and `kast-update` read it at runtime |
-| `packaging/shellcheckrc` | shellcheck's rule exceptions; passed explicitly via `--rcfile` since it's no longer an auto-discovered dotfile |
 | `docs/CHANGELOG.md` | what changed, and when |
 | `tests/` | `smoke.sh` and `test_signing.sh` |
 | `install.sh`, `uninstall.sh` | the user-scope installer and its symmetric removal |
@@ -109,9 +108,9 @@ Removing the package cleans `/usr` but leaves those per-account copies, which is
 The two must not be mixed on one machine, and `kast update` refuses to run the tarball
 installer over a `.deb` install rather than making a mess of it.
 
-Both layouts have to ship the full vendored set from `src/bin/`. Shipping the executables while
-forgetting `sutra_update.py` produces an install that works until the first update and then
-dies on an import, which is a mistake this family has made more than once.
+Both layouts have to ship the full vendored set from `src/share/kast/lib/`. Shipping the
+executables while forgetting `sutra_update.py` produces an install that works until the first
+update and then dies on an import, which is a mistake this family has made more than once.
 
 `packaging/VERSION` ships the same way, as a persistent runtime file next to the install
 (`/usr/share/kast/VERSION` for the `.deb`, `~/.local/share/kast/VERSION` for a source
@@ -120,8 +119,9 @@ own copy of the number.
 
 ## The update path
 
-`kast update` runs `src/bin/kast-update`, which is a thin wrapper over `src/bin/sutra_update.py`. That
-file is vendored byte-identical from the `sutra` repo, and `make check-sutra` proves it:
+`kast update` runs `src/bin/kast-update`, which is a thin wrapper over
+`src/share/kast/lib/sutra_update.py`. That file is vendored byte-identical from the `sutra`
+repo, and `make check-sutra` proves it:
 integrity is a hard failure, while freshness is three-way. A vendored commit that matches
 canonical HEAD is fine, an ancestor of HEAD is lag and warns, and anything not in canonical's
 history is drift and fails.
@@ -140,8 +140,9 @@ process is in [RELEASING.md](RELEASING.md).
 
 ## Conventions worth knowing before you edit
 
-* Bash runs under `set -euo pipefail` and stays ShellCheck-clean. Intentional exceptions live
-  in `packaging/shellcheckrc`, not in inline comments.
+* Bash runs under `set -euo pipefail` and stays ShellCheck-clean. Intentional exceptions are
+  passed as `-e` flags in the Makefile (a `--rcfile` needs ShellCheck 0.11.0, which
+  `ubuntu-latest` doesn't ship), each with its reason recorded beside it.
 * New runtime dependencies stay out unless Ubuntu already ships them. The pipx-isolated
   helpers are the exception, and they're isolated for exactly that reason.
 * The CLI is the integration point. If the tile needs something, the CLI grows a `--json`

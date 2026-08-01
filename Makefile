@@ -21,21 +21,21 @@ smoke: check-sutra
 # and exit 0; otherwise -> DRIFT, hard fail. Freshness only runs when the
 # canonical sutra checkout is present, which it normally isn't in CI.
 check-sutra:
-	@ver=$$(cut -d' ' -f1 src/bin/sutra_update.version); \
-	sha=$$(awk '{print $$NF}' src/bin/sutra_update.version); \
-	actual=$$(sha256sum src/bin/sutra_update.py | cut -d' ' -f1); \
+	@ver=$$(cut -d' ' -f1 src/share/kast/lib/sutra_update.version); \
+	sha=$$(awk '{print $$NF}' src/share/kast/lib/sutra_update.version); \
+	actual=$$(sha256sum src/share/kast/lib/sutra_update.py | cut -d' ' -f1); \
 	if [ "$$sha" != "$$actual" ]; then \
-	    echo "check-sutra FAIL: src/bin/sutra_update.py doesn't match src/bin/sutra_update.version" \
-	         "(hand-edited? re-vendor: bash ~/code/REPOS/sutra/vendor.sh src/bin, then keep only sutra_update.*)"; \
+	    echo "check-sutra FAIL: src/share/kast/lib/sutra_update.py doesn't match src/share/kast/lib/sutra_update.version" \
+	         "(hand-edited? re-vendor: bash ~/code/REPOS/sutra/vendor.sh src/share/kast/lib --bootstrap=kast, then keep only sutra_update.*)"; \
 	    exit 1; \
 	fi; \
 	echo "check-sutra: integrity ok (sutra_update $$ver, sha256 $$sha)"; \
 	canon="$$HOME/code/REPOS/sutra"; \
 	if [ -d "$$canon/.git" ]; then \
-	    if [ ! -f src/bin/sutra_update.commit ]; then \
+	    if [ ! -f src/share/kast/lib/sutra_update.commit ]; then \
 	        echo "check-sutra: freshness unknown (no .commit anchor, an older vendor)"; \
 	    else \
-	        recorded=$$(cat src/bin/sutra_update.commit); \
+	        recorded=$$(cat src/share/kast/lib/sutra_update.commit); \
 	        head=$$(git -C "$$canon" rev-parse HEAD); \
 	        if [ "$$recorded" = "$$head" ]; then \
 	            echo "check-sutra: freshness ok (matches canonical HEAD $$head)"; \
@@ -117,7 +117,7 @@ SHELLCHECK_EXCLUDES = SC2155,SC1090,SC1091
 
 check: check-sutra
 	shellcheck -e $(SHELLCHECK_EXCLUDES) install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
-	python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/bin/sutra_update.py
+	python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/share/kast/lib/sutra_update.py
 	node --check "src/extension/kast@asuramaya/extension.js" "src/extension/kast@asuramaya/prefs.js"
 	python3 -c "import json; json.load(open('src/extension/kast@asuramaya/metadata.json'))"
 	groff -t -k -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
@@ -178,14 +178,19 @@ deb:
 	install -d -m 0755 $(DEBROOT)/usr/share/applications
 	install -d -m 0755 $(DEBROOT)/usr/lib/systemd/user
 	install -d -m 0755 $(DEBROOT)/usr/share/man/man1
+	install -d -m 0755 $(DEBROOT)/usr/share/kast/lib
 	install -m 0755 src/bin/kast src/bin/kast-airplay src/bin/kast-control-center \
 	    src/bin/kast-healthcheck src/bin/kast-update src/bin/kast-pill $(DEBROOT)/usr/bin/
 	# kast-update's engine: the family's shared update spine (Wave B
-	# convergence, docs/RELEASE-SIGNING.md) — same sibling-import layout as
-	# the source install, never hand-edited, re-vendored via sutra's vendor.sh.
-	install -m 0644 src/bin/sutra_update.py src/bin/sutra_update.version $(DEBROOT)/usr/bin/
-	if [ -f src/bin/sutra_update.commit ]; then \
-	    install -m 0644 src/bin/sutra_update.commit $(DEBROOT)/usr/bin/; \
+	# convergence, docs/RELEASE-SIGNING.md). Lives in a private per-pill dir,
+	# not beside the binaries in the shared /usr/bin — two pills vendoring
+	# identically-named sutra_update.py into the same bin dir collide, and
+	# dpkg refuses the second package outright (ruling 3e44bd95). kast-update's
+	# own bootstrap preamble finds it here at runtime; never hand-edited,
+	# re-vendored via sutra's vendor.sh.
+	install -m 0644 src/share/kast/lib/sutra_update.py src/share/kast/lib/sutra_update.version $(DEBROOT)/usr/share/kast/lib/
+	if [ -f src/share/kast/lib/sutra_update.commit ]; then \
+	    install -m 0644 src/share/kast/lib/sutra_update.commit $(DEBROOT)/usr/share/kast/lib/; \
 	fi
 	install -m 0644 packaging/VERSION $(DEBROOT)/usr/share/kast/VERSION
 	install -m 0644 packaging/release-signing/allowed_signers $(DEBROOT)/usr/share/kast/allowed_signers

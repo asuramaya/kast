@@ -283,13 +283,22 @@ install_user_files() {
     install -D -m 755 "${ROOT_DIR}/src/bin/kast-healthcheck" "${BIN_DIR}/kast-healthcheck"
     install -D -m 755 "${ROOT_DIR}/src/bin/kast-update" "${BIN_DIR}/kast-update"
     # kast-update's engine: the family's shared update spine (Wave B
-    # convergence, docs/RELEASE-SIGNING.md), vendored beside it as a plain
-    # sibling import — never hand-edit, re-vendor via sutra's vendor.sh.
-    install -D -m 644 "${ROOT_DIR}/src/bin/sutra_update.py" "${BIN_DIR}/sutra_update.py"
-    install -D -m 644 "${ROOT_DIR}/src/bin/sutra_update.version" "${BIN_DIR}/sutra_update.version"
-    if [[ -f "${ROOT_DIR}/src/bin/sutra_update.commit" ]]; then
-        install -D -m 644 "${ROOT_DIR}/src/bin/sutra_update.commit" "${BIN_DIR}/sutra_update.commit"
+    # convergence, docs/RELEASE-SIGNING.md). Lives in a private per-pill dir
+    # under DATA_HOME, not beside the binaries in the shared BIN_DIR — two
+    # pills vendoring identically-named sutra_update.py into the same bin
+    # dir collide, and install.sh's plain `install` has no ownership
+    # tracking to catch it (ruling 3e44bd95). kast-update's own bootstrap
+    # preamble derives this path from its own location at runtime, never
+    # told where $PREFIX is. Never hand-edit, re-vendor via sutra's vendor.sh.
+    install -D -m 644 "${ROOT_DIR}/src/share/kast/lib/sutra_update.py" "${DATA_HOME}/${APP_ID}/lib/sutra_update.py"
+    install -D -m 644 "${ROOT_DIR}/src/share/kast/lib/sutra_update.version" "${DATA_HOME}/${APP_ID}/lib/sutra_update.version"
+    if [[ -f "${ROOT_DIR}/src/share/kast/lib/sutra_update.commit" ]]; then
+        install -D -m 644 "${ROOT_DIR}/src/share/kast/lib/sutra_update.commit" "${DATA_HOME}/${APP_ID}/lib/sutra_update.commit"
     fi
+    # Pre-migration location cleanup: those copies were owned by nothing
+    # (plain `install`, not dpkg) and would linger forever on an upgrade
+    # otherwise (BOOTSTRAP.md).
+    rm -f "${BIN_DIR}/sutra_update.py" "${BIN_DIR}/sutra_update.version" "${BIN_DIR}/sutra_update.commit"
     # A persistent copy of the signing anchor for kast-update to verify
     # against after install: the embedded RELEASE_ALLOWED_SIGNERS above only
     # covers the curl-pipe bootstrap itself, and a source-installed kast has

@@ -39,7 +39,17 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# --- sutra bootstrap (sutra 0.8.1; see BOOTSTRAP.md -- do not hand-edit) ----
+import os as _os
+import sys as _sys
+_PILL = "kast"
+_libdir = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.realpath(__file__))),
+    "share", _PILL, "lib")
+if _libdir not in _sys.path:
+    _sys.path.insert(0, _libdir)
+del _os, _sys, _libdir, _PILL
+# --- end sutra bootstrap ----------------------------------------------------
 import sutra_update  # noqa: E402
 
 PILL = "kast"

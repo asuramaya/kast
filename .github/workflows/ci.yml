@@ -30,7 +30,7 @@ jobs:
         run: shellcheck -e SC2155,SC1090,SC1091 install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 
       - name: Python helpers (syntax)
-        run: python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/bin/sutra_update.py
+        run: python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/share/kast/lib/sutra_update.py
 
       - name: Sutra vendor drift guard
         run: make check-sutra

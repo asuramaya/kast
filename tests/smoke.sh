@@ -106,7 +106,7 @@ if command -v dpkg-deb >/dev/null 2>&1; then
             CONTENTS="$(dpkg-deb --contents "${DEBFILE}")"
             deb_ok=1
             for want in usr/bin/kast usr/bin/kast-pill usr/bin/kast-healthcheck usr/bin/kast-update \
-                        usr/bin/sutra_update.py usr/bin/sutra_update.version \
+                        usr/share/kast/lib/sutra_update.py usr/share/kast/lib/sutra_update.version \
                         usr/share/kast/allowed_signers \
                         usr/lib/systemd/user/uxplay.service usr/lib/systemd/user/kast-update.timer \
                         usr/share/kast/extension/kast@asuramaya/extension.js \
@@ -135,10 +135,49 @@ src_ok=1
 # Single-quoted on purpose: these are the literal install.sh source strings
 # to grep for, not variables to expand here.
 # shellcheck disable=SC2016
-for want in '${BIN_DIR}/sutra_update.py' '${BIN_DIR}/sutra_update.version' '${DATA_HOME}/${APP_ID}/allowed_signers' '${DATA_HOME}/${APP_ID}/VERSION' '${DATA_HOME}/man/man1/kast.1'; do
+for want in '${DATA_HOME}/${APP_ID}/lib/sutra_update.py' '${DATA_HOME}/${APP_ID}/lib/sutra_update.version' '${DATA_HOME}/${APP_ID}/allowed_signers' '${DATA_HOME}/${APP_ID}/VERSION' '${DATA_HOME}/man/man1/kast.1'; do
     grep -qF "${want}" "${ROOT_DIR}/install.sh" || { bad "install.sh missing ${want}"; src_ok=0; }
 done
 [[ "${src_ok}" -eq 1 ]] && ok "install.sh ships sutra_update.py + allowed_signers + VERSION + man page (source layout)"
+
+# --- the bootstrap preamble must resolve to the REAL vendored copy, not just
+# fail to crash. A staging mistake (e.g. vendoring to src/data/lib instead of
+# src/share/kast/lib, three other seats' independent mistake per Alfred msg
+# 2572) can still pass every check above: kast-update never crashes, install.sh
+# still names the right strings — the only thing that catches it is asking
+# where the import actually resolved. First-class check, not an inferred side
+# effect of the binary not crashing (alfred, msg 2572, citing RAMstein
+# b211651).
+if resolve_out="$(ROOT_DIR="${ROOT_DIR}" python3 - <<'PY' 2>&1
+import importlib.util
+import os
+from importlib.machinery import SourceFileLoader
+
+root = os.environ["ROOT_DIR"]
+# src/bin/kast-update has no .py suffix, so spec_from_file_location can't
+# infer a loader on its own; hand it one explicitly. Its own sutra bootstrap
+# preamble (BOOTSTRAP.md) runs as part of exec_module below and finds
+# src/share/kast/lib/sutra_update.py on its own; no sys.path setup needed
+# here. Everything below kast-update's `if __name__ == "__main__":` guard
+# does NOT run, since the loader gives this module a different __name__.
+loader = SourceFileLoader("kast_update_smoke", os.path.join(root, "src/bin/kast-update"))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+
+expected = os.path.realpath(os.path.join(root, "src/share/kast/lib/sutra_update.py"))
+actual = os.path.realpath(mod.sutra_update.__file__)
+if actual != expected:
+    raise SystemExit(
+        f"sutra bootstrap resolved to {actual}, expected {expected} "
+        "(BOOTSTRAP.md's fixed path arithmetic, not wherever it happened to find one)")
+print(actual)
+PY
+)"; then
+    ok "kast-update's sutra bootstrap resolves to the real vendored copy (${resolve_out})"
+else
+    bad "kast-update's sutra bootstrap did not resolve to the expected path: ${resolve_out}"
+fi
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [[ "${fail}" -eq 0 ]]
