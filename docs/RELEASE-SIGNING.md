@@ -187,4 +187,4 @@ vendors only `sutra_update.py` — no daemon, so `sutra.py`/`sutra_xen.py`
 would be dead code (ship-what-you-import). It lives in a private per-pill
 directory rather than beside the binaries, so its identically-named copy in
 another pill can't collide with kast's on a machine with more than one pill
-installed (ruling `3e44bd95`, `~/code/REPOS/sutra/BOOTSTRAP.md`).
+installed (ruling `3e44bd95`, `~/code/REPOS/sutra/docs/BOOTSTRAP.md`).

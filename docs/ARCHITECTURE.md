@@ -74,6 +74,7 @@ more than it used to, since the root listing no longer shows them individually.
 | `src/bin/kast-healthcheck` | CLI parity with the family: does the status.json seam agree with live systemd reality. Not wired into any timer; kast has no daemon to check periodically |
 | `src/share/kast/lib/sutra_update.py` | the family's shared update spine, vendored byte-identical from `sutra`. Lives in a private per-pill dir, not beside the binaries, so two pills' identically-named copies can't collide in a shared bin dir (ruling `3e44bd95`) |
 | `src/share/kast/lib/sutra_update.version`, `.commit` | drift anchors for the vendored copy |
+| `src/share/kast/lib/sutra.mk` | the family's shared recipe layer, vendored the same way as code — see below |
 | `src/extension/kast@asuramaya/` | the GNOME pill: `extension.js` is the tile, `prefs.js` the settings dialog |
 | `src/data/` | files installed onto the system as-is: `systemd/user/` (the three off-by-default receiver units, plus the update service and timer), `config/` (the PipeWire RAOP drop-in, the `uxplay.conf` example), `applications/` (the desktop entry that opens the picker), `dbus/` (the activation file that starts the gnome-network-displays daemon on demand), `man/man1/kast.1` (the man page: every verb, kept in sync with `docs/USAGE.md` by hand, same as every sibling pill's) |
 | `src/youtube-receiver/` | a separate Node runtime, the DIAL receiver built on `yt-cast-receiver` |
@@ -116,6 +117,20 @@ update and then dies on an import, which is a mistake this family has made more 
 (`/usr/share/kast/VERSION` for the `.deb`, `~/.local/share/kast/VERSION` for a source
 install), so `src/bin/kast` and `kast-update` can read it after the fact rather than carry their
 own copy of the number.
+
+Kast adopted sutra 0.11.1's recipe layer the same way as the code: `src/share/kast/lib/sutra.mk`,
+included from the root `Makefile` (`PILL := kast`), supplies `check-sutra` itself, the canonical
+tracked-files row count (`check-repo` references `SUTRA_ROOT_ROWS` instead of re-deriving it),
+and `check-vendored-path`. That last one loads `kast-update` as a real module and asks Python
+what it actually imported, rather than checking that a file merely exists at the path the
+bootstrap preamble's own arithmetic predicts — the file-exists version is a layout check, not a
+resolution check, and passes cleanly on the exact regression it's meant to catch: a binary
+missing the preamble entirely, sitting beside a stale co-located `sutra_update.py`, still
+imports successfully through Python's own script-directory `sys.path` rule. Kast is the one
+pill in the family that vendors only `sutra_update`, not `sutra` (see the exemptions table
+below), and whose sutra-importing binary isn't named `src/bin/kast` — the Makefile sets
+`SUTRA_CHECK_MODULE := sutra_update` and `SUTRA_CHECK_BIN := src/bin/kast-update` to say so;
+every other pill gets both defaults for free.
 
 ## The update path
 

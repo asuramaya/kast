@@ -1,54 +1,40 @@
 # kast — the cast demon
-.PHONY: smoke install uninstall pill sync-signers deb check-sutra check-repo check attack
+.PHONY: smoke install uninstall pill sync-signers deb check-repo check attack
 
 VERSION := $(shell tr -d '[:space:]' < packaging/VERSION)
+
+# The family's shared recipe layer (sutra.mk, vendored like code under its
+# own .version/.commit anchor -- see docs/BOOTSTRAP.md and the file's own
+# header, ruling 3e44bd95). Supplies check-sutra (integrity+freshness for
+# the vendored .py modules), SUTRA_ROOT_ROWS (the canonical tracked-files
+# row count check-repo uses below), and check-vendored-path (the
+# checkout-run resolution guard -- generalizes this repo's own earlier
+# tests/smoke.sh assertion, one of sutra.mk's two named references). PILL
+# must be set before the include; everything else in sutra.mk resolves
+# relative to its own vendored location, never this Makefile's.
+PILL := kast
+include src/share/kast/lib/sutra.mk
+
+# kast is the odd pill in two ways sutra.mk's defaults don't cover: it
+# vendors only sutra_update (no daemon, so sutra.py/sutra_xen.py would be
+# dead code -- see docs/ARCHITECTURE.md's Standard exemptions), not the
+# `sutra` every other pill's default assumes; and the binary that imports
+# it isn't named src/bin/kast (sutra.mk's default SUTRA_CHECK_BIN), it's
+# src/bin/kast-update -- kast itself (the bash CLI) never touches sutra at
+# all. Every other pill gets both defaults for free; kast needs both set.
+SUTRA_CHECK_MODULE := sutra_update
+SUTRA_CHECK_BIN := src/bin/kast-update
+
+# kast does not vendor pill.js (extension.js has no `import * as Pill from
+# './pill.js'`) -- SUTRA_EXT_DIR stays unset on purpose, not an oversight
+# (Alfred msg 2761: "your call, and record it either way").
+
 DEBROOT := build/deb/kast_$(VERSION)_all
 DEBFILE := build/deb/kast_$(VERSION)_all.deb
 
 smoke: check-sutra
 	bash tests/smoke.sh
 	bash tests/test_signing.sh
-
-# Drift guard for the vendored sutra_update.py copy (UNIFY.md Wave B
-# convergence, docs/RELEASE-SIGNING.md). Integrity (hash matches what
-# vendor.sh recorded — the copy wasn't hand-edited) is the hard gate,
-# always enforced. Freshness is a THREE-WAY read (sutra's 0.7.0 ruling,
-# decision d51e090f — a plain HEAD-compare reddened on ordinary LAG, an
-# honest vendor from an earlier canonical commit, indistinguishable from
-# real DRIFT, a hand-edited or corrupted copy): no .commit anchor ->
-# freshness unknown (an older vendor, harmless); recorded commit == canonical
-# HEAD -> freshness ok; recorded commit is an ancestor of HEAD -> LAG, warn
-# and exit 0; otherwise -> DRIFT, hard fail. Freshness only runs when the
-# canonical sutra checkout is present, which it normally isn't in CI.
-check-sutra:
-	@ver=$$(cut -d' ' -f1 src/share/kast/lib/sutra_update.version); \
-	sha=$$(awk '{print $$NF}' src/share/kast/lib/sutra_update.version); \
-	actual=$$(sha256sum src/share/kast/lib/sutra_update.py | cut -d' ' -f1); \
-	if [ "$$sha" != "$$actual" ]; then \
-	    echo "check-sutra FAIL: src/share/kast/lib/sutra_update.py doesn't match src/share/kast/lib/sutra_update.version" \
-	         "(hand-edited? re-vendor: bash ~/code/REPOS/sutra/vendor.sh src/share/kast/lib --bootstrap=kast, then keep only sutra_update.*)"; \
-	    exit 1; \
-	fi; \
-	echo "check-sutra: integrity ok (sutra_update $$ver, sha256 $$sha)"; \
-	canon="$$HOME/code/REPOS/sutra"; \
-	if [ -d "$$canon/.git" ]; then \
-	    if [ ! -f src/share/kast/lib/sutra_update.commit ]; then \
-	        echo "check-sutra: freshness unknown (no .commit anchor, an older vendor)"; \
-	    else \
-	        recorded=$$(cat src/share/kast/lib/sutra_update.commit); \
-	        head=$$(git -C "$$canon" rev-parse HEAD); \
-	        if [ "$$recorded" = "$$head" ]; then \
-	            echo "check-sutra: freshness ok (matches canonical HEAD $$head)"; \
-	        elif git -C "$$canon" merge-base --is-ancestor "$$recorded" HEAD 2>/dev/null; then \
-	            echo "check-sutra: LAG (vendored from $$recorded, canonical has since moved to $$head) -- warn, not a failure"; \
-	        else \
-	            echo "check-sutra FAIL: DRIFT (vendored commit $$recorded is not in canonical's history at $$canon) -- re-vendor"; \
-	            exit 1; \
-	        fi; \
-	    fi; \
-	else \
-	    echo "check-sutra: canonical sutra checkout not present, freshness skipped"; \
-	fi
 
 # Mechanical proof that kast still meets REPO-STANDARD.md, the standard it
 # was chosen to exemplify (Alfred msg 1724: kast was the only converged pill
@@ -64,7 +50,7 @@ check-repo:
 	if [ ! -e src/data/man/man1/kast.1 ]; then \
 	    echo "check-repo FAIL: no src/data/man/man1/kast.1"; fail=1; \
 	fi; \
-	rows=$$(git ls-files | cut -d/ -f1 | sort -u | wc -l); \
+	rows=$(SUTRA_ROOT_ROWS); \
 	if [ "$$rows" -gt 12 ]; then \
 	    echo "check-repo FAIL: root has $$rows rows, standard caps it at 12"; fail=1; \
 	else \
@@ -115,7 +101,7 @@ check-repo:
 #         be followed statically.
 SHELLCHECK_EXCLUDES = SC2155,SC1090,SC1091
 
-check: check-sutra
+check: check-sutra check-vendored-path
 	shellcheck -e $(SHELLCHECK_EXCLUDES) install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 	python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/share/kast/lib/sutra_update.py
 	node --check "src/extension/kast@asuramaya/extension.js" "src/extension/kast@asuramaya/prefs.js"

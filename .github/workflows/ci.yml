@@ -9,48 +9,53 @@ permissions:
   contents: read
 
 jobs:
-  lint:
+  # The family's shared CI core (sutra.mk's sibling layer -- see
+  # docs/BOOTSTRAP.md in the sutra repo). Pinned to a commit SHA, not @main
+  # and not a tag, per pill-ci.yml's own header: sutra cuts no tagged
+  # release yet, and a floating @main ref would move every adopting pill's
+  # CI the instant this file changes, with no per-pill review step.
+  shared:
+    uses: asuramaya/sutra/.github/workflows/pill-ci.yml@149b553b75467813748165401706ce6b50ca44d6
+    with:
+      python-files: "src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/share/kast/lib/sutra_update.py"
+      shell-files: "install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh"
+      shellcheck-files: "install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh"
+      shellcheck-exclude: "SC2155,SC1090,SC1091"
+      has-extension: true
+      extension-js: "src/extension/kast@asuramaya/extension.js"
+      extension-metadata: "src/extension/kast@asuramaya/metadata.json"
+      man-pages: "src/data/man/man1/kast.1"
+      # run-attack, run-check-version, run-signing-verify all stay at their
+      # defaults (false): kast has no daemon/socket surface to fuzz (`make
+      # attack` is a documented no-op exemption, see the Makefile);
+      # packaging/VERSION is the one version constant, read live at
+      # runtime -- there is no per-file literal to check, and check-repo's
+      # own rule enforces exactly the opposite of what check-version tests
+      # for (same convention as ByeByte/RAMstein); and test_signing.sh is
+      # already covered by run-smoke -- `make smoke`'s own recipe runs it,
+      # so run-signing-verify would run it a second time.
+
+  # Genuinely kast-specific, per pill-ci.yml's own header ("stays as a
+  # sibling job in the calling pill's own ci.yml").
+  kast-specific:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      # First, before anything below can create a build/dist artifact that
-      # would otherwise trip the row-count check for the wrong reason
-      # (REPO-STANDARD.md: order the structure gate before any build step,
-      # not just exclude gitignored paths from the count). Subsumes the old
-      # narrow "one version constant" grep — check-repo's version check
-      # covers every binary and the extension, not just two files.
-      - name: Repo structure gate (REPO-STANDARD.md)
-        run: make check-repo
+      # The checkout-run resolution guard. No pill-ci.yml step exists for
+      # this (confirmed by reading its full step list) -- sutra.mk's
+      # check-vendored-path validates one binary per call. kast has exactly
+      # one sutra-importing binary (kast-update, binding sutra_update, not
+      # sutra -- see the Makefile's SUTRA_CHECK_MODULE/SUTRA_CHECK_BIN),
+      # so this calls check-vendored-path directly rather than the
+      # SUTRA_CHECK_BINS + check-vendored-path-all loop RAMstein/ByeByte
+      # need for their several sutra-importing binaries.
+      - name: Vendored-path resolution (kast-update -> sutra_update)
+        run: make check-vendored-path
 
-      - name: ShellCheck
-        # -e rather than --rcfile: the flag only exists from shellcheck 0.11.0
-        # and ubuntu-latest ships an older build. Rationale per code is in the
-        # Makefile, which carries the same exclusion list.
-        run: shellcheck -e SC2155,SC1090,SC1091 install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
-
-      - name: Python helpers (syntax)
-        run: python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/share/kast/lib/sutra_update.py
-
-      - name: Sutra vendor drift guard
-        run: make check-sutra
-
-      - name: Shell extension (syntax)
-        run: |
-          node --check "src/extension/kast@asuramaya/extension.js"
-          node --check "src/extension/kast@asuramaya/prefs.js"
-
-      - name: Shell extension metadata (valid JSON)
-        run: python3 -c "import json; json.load(open('src/extension/kast@asuramaya/metadata.json'))"
-
-      - name: man page (syntax)
-        # -t -k, not just -Tutf8 -ww: the bare form exits 0 while silently
-        # skipping the table and UTF-8 preprocessor passes, so a malformed
-        # table would render clean. Family-wide hardening (Alfred, msg 1628).
-        run: groff -t -k -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
-
-      - name: CLI smoke
-        run: bash tests/smoke.sh
-
-      - name: Release-signing verify path
-        run: bash tests/test_signing.sh
+      # kast is the only pill (so far) with a second GNOME extension entry
+      # point: pill-ci.yml's has-extension step above checks exactly one JS
+      # file (extension-js), so prefs.js -- the settings dialog -- needs
+      # its own step here or it silently loses syntax checking on adoption.
+      - name: prefs.js (syntax)
+        run: node --check "src/extension/kast@asuramaya/prefs.js"

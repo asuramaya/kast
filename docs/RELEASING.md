@@ -20,7 +20,9 @@ world reads.
 Run the checks:
 
 ```bash
-make check          # shellcheck, node --check, the CLI's own self-test
+make check          # shellcheck, node --check, the vendored spine matches canonical byte
+                    # for byte, kast-update actually resolves it to the real installed
+                    # copy (not just a file that happens to exist), the CLI's own self-test
 make check-sutra    # the vendored spine matches canonical, byte for byte
 make smoke          # end to end, against a throwaway XDG home
 ```

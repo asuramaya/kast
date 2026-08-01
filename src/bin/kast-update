@@ -39,7 +39,7 @@ import subprocess
 import sys
 import tempfile
 
-# --- sutra bootstrap (sutra 0.8.1; see BOOTSTRAP.md -- do not hand-edit) ----
+# --- sutra bootstrap (sutra 0.11.1; see docs/BOOTSTRAP.md -- do not hand-edit) ----
 import os as _os
 import sys as _sys
 _PILL = "kast"
