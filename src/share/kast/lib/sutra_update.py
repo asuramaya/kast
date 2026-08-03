@@ -6,7 +6,7 @@
 #
 #     import sutra_update
 #     sys.exit(sutra_update.main(
-#         pill="byebyte", slug="asuramaya/ByeByte",
+#         pill="byebyte", slug="asuramaya/byebyte",
 #         installed_version=read_version(),
 #         anchor_candidates=["/usr/share/byebyte/allowed_signers",
 #                            SRC + "/release-signing/allowed_signers"],
@@ -28,7 +28,7 @@
 # dpkg -i (no split-brain writes over dpkg's files, ever); source install =>
 # verified tarball => its own install.sh. GPLv3, stdlib-only.
 
-SUTRA_UPDATE_VERSION = "0.1.0"
+SUTRA_UPDATE_VERSION = "0.1.1"
 
 import hashlib
 import json

@@ -131,7 +131,7 @@ update and then dies on an import, which is a mistake this family has made more 
 install), so `src/bin/kast` and `kast-update` can read it after the fact rather than carry their
 own copy of the number.
 
-Kast adopted sutra 0.11.1's recipe layer the same way as the code: `src/share/kast/lib/sutra.mk`,
+Kast adopted sutra's recipe layer the same way as the code: `src/share/kast/lib/sutra.mk`,
 included from the root `Makefile` (`PILL := kast`), supplies `check-sutra` itself, the canonical
 tracked-files row count (`check-repo` references `SUTRA_ROOT_ROWS` instead of re-deriving it),
 and `check-vendored-path`. That last one loads `kast-update` as a real module and asks Python
