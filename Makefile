@@ -205,7 +205,7 @@ deb:
 	  echo "Priority: optional"; \
 	  echo "Architecture: all"; \
 	  echo "Depends: python3, jq, systemd, openssh-client"; \
-	  echo "Suggests: gnome-shell, uxplay, gnome-network-displays, avahi-utils, zenity, pipewire-pulse, network-manager, wireplumber"; \
+	  echo "Suggests: gnome-shell, avahi-daemon, avahi-utils, gnome-network-displays, network-manager, pipewire-audio, pipewire-pulse, uxplay, wireplumber, wpasupplicant, zenity"; \
 	  echo "Maintainer: asuramaya <asuramaya@users.noreply.github.com>"; \
 	  echo "Homepage: https://github.com/asuramaya/kast"; \
 	  echo "Description: Win+K-style cast panel for GNOME"; \

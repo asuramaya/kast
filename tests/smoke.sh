@@ -132,8 +132,9 @@ if command -v dpkg-deb >/dev/null 2>&1; then
             for want in python3 jq systemd openssh-client; do
                 grep -q "${want}" <<<"${deb_depends}" || { bad "deb Depends missing ${want}"; dep_ok=0; }
             done
-            for want in gnome-shell uxplay gnome-network-displays avahi-utils \
-                        zenity pipewire-pulse network-manager wireplumber; do
+            for want in gnome-shell avahi-daemon avahi-utils gnome-network-displays \
+                        network-manager pipewire-audio pipewire-pulse uxplay \
+                        wireplumber wpasupplicant zenity; do
                 grep -q "${want}" <<<"${deb_suggests}" || { bad "deb Suggests missing ${want}"; dep_ok=0; }
             done
             [[ -z "${deb_recommends}" ]] || { bad "deb still has a Recommends field (apt installs it by default): ${deb_recommends}"; dep_ok=0; }
