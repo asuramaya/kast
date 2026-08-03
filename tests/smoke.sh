@@ -116,6 +116,28 @@ if command -v dpkg-deb >/dev/null 2>&1; then
                 grep -q "${want}" <<<"${CONTENTS}" || { bad "deb missing ${want}"; deb_ok=0; }
             done
             [[ "${deb_ok}" -eq 1 ]] && ok "deb built and contents verified (never installed)"
+
+            # --- family dependency standard (operator ruling 2cd900ce):
+            # apt installs Recommends by default, so a Depends/Recommends
+            # split doesn't actually stop an unwanted package arriving --
+            # only Suggests does. Assert the real field names and contents
+            # dpkg-deb reports, not just that the Makefile has the right
+            # `echo` lines: a rename typo (e.g. "Recommend:") would pass
+            # every check above and still auto-pull GNOME Shell onto a
+            # headless box. ---
+            deb_depends="$(dpkg-deb -f "${DEBFILE}" Depends)"
+            deb_suggests="$(dpkg-deb -f "${DEBFILE}" Suggests)"
+            deb_recommends="$(dpkg-deb -f "${DEBFILE}" Recommends)"
+            dep_ok=1
+            for want in python3 jq systemd openssh-client; do
+                grep -q "${want}" <<<"${deb_depends}" || { bad "deb Depends missing ${want}"; dep_ok=0; }
+            done
+            for want in gnome-shell uxplay gnome-network-displays avahi-utils \
+                        zenity pipewire-pulse network-manager wireplumber; do
+                grep -q "${want}" <<<"${deb_suggests}" || { bad "deb Suggests missing ${want}"; dep_ok=0; }
+            done
+            [[ -z "${deb_recommends}" ]] || { bad "deb still has a Recommends field (apt installs it by default): ${deb_recommends}"; dep_ok=0; }
+            [[ "${dep_ok}" -eq 1 ]] && ok "deb Depends is the hard floor, everything else is Suggests (not Recommends)"
         else
             bad "make deb produced no .deb"
         fi

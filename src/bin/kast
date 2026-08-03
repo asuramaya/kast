@@ -68,7 +68,11 @@ die() {
 }
 
 need() {
-    command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
+    # $2 names the apt package when it differs from the command name (e.g.
+    # `need wpctl wireplumber`) -- family dependency standard (operator
+    # ruling 2cd900ce): any verb that needs an absent package names the
+    # remedy in its own refusal, not just in `kast doctor`'s report.
+    command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1 (apt install ${2:-$1})"
 }
 
 valid_ip() {
@@ -225,7 +229,7 @@ resolve_sink_id() {
 }
 
 select_sink() {
-    need wpctl
+    need wpctl wireplumber
     local sink_id
     sink_id="$(resolve_sink_id "${1:-}")"
     [[ -n "${sink_id}" ]] || die "No matching sink found"
@@ -245,7 +249,7 @@ select_airplay() {
 }
 
 select_local() {
-    need wpctl
+    need wpctl wireplumber
     local sink_id
     sink_id="$(list_sinks_json | jq -r 'map(select(.raop == false)) | first | .id // empty')"
     [[ -n "${sink_id}" ]] || die "No local sink is currently available"
@@ -407,7 +411,7 @@ open_display_cast_plain() {
     if command -v gnome-network-displays >/dev/null 2>&1; then
         spawn_app gnome-network-displays
     else
-        die "gnome-network-displays is not installed"
+        die "gnome-network-displays is not installed (apt install gnome-network-displays)"
     fi
 }
 
@@ -427,6 +431,11 @@ open_display_cast() {
     ensure_state_dir
 
     if [[ "${drop_wifi}" -eq 1 ]]; then
+        # nmcli is optional (network-manager, packages.txt) -- without this
+        # guard, an absent nmcli would abort silently under set -e/pipefail
+        # (active_wifi_connection's pipeline exits 127, stderr already
+        # redirected away) instead of naming the fix.
+        need nmcli network-manager
         local wifi_conn wifi_dev
         wifi_conn="$(active_wifi_connection)"
         wifi_dev="$(active_wifi_device)"
@@ -444,6 +453,7 @@ open_display_cast() {
 }
 
 reconnect_wifi() {
+    need nmcli network-manager
     local wifi_conn
     wifi_conn=""
     if [[ -f "${WIFI_STATE_FILE}" ]]; then
@@ -821,7 +831,7 @@ airplay_cast() {
 pick_video_file() {
     # Graphical file chooser → prints the chosen path (empty on cancel).
     local title="${1:-Cast a video}"
-    command -v zenity >/dev/null 2>&1 || die "zenity is needed for the file picker"
+    command -v zenity >/dev/null 2>&1 || die "zenity is needed for the file picker (apt install zenity)"
     zenity --file-selection \
         --title="${title}" \
         --file-filter='Video | *.mp4 *.m4v *.mkv *.mov *.webm *.avi' \
@@ -1546,16 +1556,18 @@ mark() {
 doctor_run() {
     printf 'kast doctor (v%s)\n\n' "${KAST_VERSION}"
 
+    # jq is the family's hard floor's one domain exemption for kast (nearly
+    # every verb pipes through it) -- everything else below is optional
+    # (Suggests, not Depends/Recommends: operator ruling 2cd900ce), so its
+    # absence is the only one that fails doctor outright rather than warning.
     printf 'Core tools\n'
-    local c
-    for c in jq wpctl pw-dump nmcli; do
-        if have "${c}"; then mark ok "${c}"; else mark fail "${c} missing" "run ./install.sh, or apt install the package providing ${c}"; fi
-    done
+    if have jq; then mark ok "jq"; else mark fail "jq missing" "run ./install.sh, or apt install jq"; fi
 
     printf '\nDiscovery\n'
     if have avahi-browse; then mark ok "avahi-browse (Chromecast mDNS)"; else mark warn "avahi-browse missing" "Chromecast discovery off; apt install avahi-utils"; fi
     if have gdbus && have busctl; then mark ok "gdbus + busctl (Miracast P2P)"; else mark warn "gdbus/busctl missing" "Miracast discovery off"; fi
-    if nmcli -t -f TYPE device status 2>/dev/null | grep -qx 'wifi-p2p'; then mark ok "Wi-Fi P2P device present"; else mark warn "no Wi-Fi P2P device" "this adapter can't do Miracast"; fi
+    if have nmcli; then mark ok "nmcli (NetworkManager)"; else mark warn "nmcli missing" "--drop-wifi and Miracast discovery off; apt install network-manager"; fi
+    if have nmcli && nmcli -t -f TYPE device status 2>/dev/null | grep -qx 'wifi-p2p'; then mark ok "Wi-Fi P2P device present"; else mark warn "no Wi-Fi P2P device" "this adapter can't do Miracast"; fi
 
     printf '\nReceivers (inbound, off by default)\n'
     if have uxplay; then mark ok "uxplay installed (AirPlay screen mirroring in)"; else mark warn "uxplay not installed" "apt install uxplay for AirPlay screen mirroring"; fi
@@ -1579,7 +1591,7 @@ doctor_run() {
     if systemctl --user is-active --quiet kast-youtube.service 2>/dev/null; then mark ok "YouTube receiver running"; else mark ok "YouTube receiver off (enable from the Kast tile)"; fi
 
     printf '\nOutbound display cast\n'
-    if have gnome-network-displays; then mark ok "gnome-network-displays installed"; else mark fail "gnome-network-displays missing" "apt install gnome-network-displays"; fi
+    if have gnome-network-displays; then mark ok "gnome-network-displays installed"; else mark warn "gnome-network-displays missing" "Chromecast/Miracast casting off; apt install gnome-network-displays"; fi
     if have "${GND_DAEMON_BIN}"; then mark ok "gnd daemon (one-click connect)"; else mark warn "gnd daemon missing" "one-click connect needs gnome-network-displays >=0.99.0; casting falls back to the GUI"; fi
     if have_pyatv; then
         mark ok "pyatv (AirPlay video out)"
@@ -1593,6 +1605,8 @@ doctor_run() {
     printf '\nAudio routing\n'
     local raop="${CONFIG_HOME}/pipewire/pipewire.conf.d/50-raop.conf"
     if [[ -f "${raop}" ]]; then mark ok "PipeWire RAOP discovery config installed"; else mark warn "RAOP config missing" "re-run ./install.sh"; fi
+    if have wpctl; then mark ok "wpctl (WirePlumber sink control)"; else mark warn "wpctl missing" "sink selection off; apt install wireplumber"; fi
+    if have pw-dump; then mark ok "pw-dump (PipeWire session info)"; else mark warn "pw-dump missing" "apt install pipewire-audio"; fi
 
     printf '\nDesktop integration\n'
     local ext_dir="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/kast@asuramaya"

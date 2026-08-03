@@ -79,7 +79,7 @@ more than it used to, since the root listing no longer shows them individually.
 | `src/data/` | files installed onto the system as-is: `systemd/user/` (the three off-by-default receiver units, plus the update service and timer), `config/` (the PipeWire RAOP drop-in, the `uxplay.conf` example), `applications/` (the desktop entry that opens the picker), `dbus/` (the activation file that starts the gnome-network-displays daemon on demand), `man/man1/kast.1` (the man page: every verb, kept in sync with `docs/USAGE.md` by hand, same as every sibling pill's) |
 | `src/youtube-receiver/` | a separate Node runtime, the DIAL receiver built on `yt-cast-receiver` |
 | `packaging/deb/` | `.deb` maintainer scripts. `make deb` builds one and never installs it |
-| `packaging/packages.txt` | the apt packages the installer needs, one per line with comments |
+| `packaging/packages.txt` | the apt packages `install.sh` needs, hard vs optional (see below), one per line with comments |
 | `packaging/release-signing/allowed_signers` | the trust anchor for release verification |
 | `packaging/release-signing/sync-signers.sh` | rebuilds that anchor from the canonical public keys |
 | `packaging/VERSION` | the one version constant (REPO-STANDARD.md); `src/bin/kast` and `kast-update` read it at runtime |
@@ -108,6 +108,19 @@ Removing the package cleans `/usr` but leaves those per-account copies, which is
 
 The two must not be mixed on one machine, and `kast update` refuses to run the tarball
 installer over a `.deb` install rather than making a mess of it.
+
+Nothing auto-pulls (operator ruling `2cd900ce`, the family dependency standard). The `.deb`'s
+`Depends:` is the family's hard floor (`python3`, `systemd`, `openssh-client`) plus kast's one
+domain exemption, `jq` — nearly every verb pipes through it, and the bash CLI has no stdlib JSON
+parser of its own to fall back on. Every other package kast can use — the eight in
+`packaging/packages.txt`'s optional section — is `Suggests:`, never `Recommends:`: apt does not
+install a `Suggests` package by default, so `apt install kast.deb` alone pulls nothing beyond the
+four hard packages, and each protocol (AirPlay, Chromecast, Miracast, the graphical picker) stays
+absent until its own package is. `install.sh`'s source-install path is more generous — it apt-gets
+the full optional list unconditionally, on the theory that a plain install should just work — but
+every optional package's absence still degrades cleanly rather than crashing: `kast doctor`
+reports it, and the specific verb that needed it names the fix in its own refusal (`need()`'s
+`(apt install <package>)` suffix) rather than failing an unrelated one.
 
 Both layouts have to ship the full vendored set from `src/share/kast/lib/`. Shipping the
 executables while forgetting `sutra_update.py` produces an install that works until the first

@@ -1,12 +1,31 @@
-# Core discovery and audio routing
-avahi-daemon
-avahi-utils
+# kast — runtime dependencies. Hard vs optional follows the family's
+# dependency standard (operator ruling 2cd900ce): the hard floor is
+# python3/systemd/openssh-client plus documented domain exemptions; anything
+# that backs one feature rather than the whole CLI is optional (the .deb's
+# Suggests, not Recommends — apt does not install a Suggests package by
+# default), and the verb that needs it names the fix in its own refusal (see
+# `kast doctor` and src/bin/kast's need()). This file is parsed by
+# install.sh — each bare line below is passed straight to apt-get install, so
+# a note about a package always sits on its own comment line, never inline,
+# or it would end up as part of the apt argument.
+
+# --- hard (the .deb's Depends: python3, jq, systemd, openssh-client) ------
+
+python3
+
+# systemctl --user: the uxplay/shairport-sync/kast-youtube receiver units
+# (off by default, but the units themselves ship and are queried by `kast
+# doctor`/`receiver-status`), plus kast-update's own service and timer.
+systemd
+
+# Nearly every kast verb pipes through this — not one feature's dependency,
+# the whole CLI's. src/bin/kast is bash by design (docs/ARCHITECTURE.md: the
+# source of truth for behaviour), and bash has no stdlib JSON parser, so this
+# is a domain exemption, not bookkeeping — the same work can't be done in
+# stdlib Python without moving the CLI out of bash. Caught by an
+# isolated-container install test: without jq, `kast update` aborts silently
+# under set -e/pipefail before reaching any of its own logic.
 jq
-network-manager
-pipewire-audio
-pipewire-pulse
-wireplumber
-wpasupplicant
 
 # `ssh-keygen -Y verify`: install.sh's bootstrap release-signature check
 # against release-signing/allowed_signers (docs/RELEASE-SIGNING.md). Absent:
@@ -15,32 +34,84 @@ wpasupplicant
 # and update; don't leave it to chance.
 openssh-client
 
-# Outbound display casting
+# --- optional (soft; every one degrades to a plain warning or a refusal
+# naming the fix — see `kast doctor` and each verb's own message — never a
+# silent crash. avahi-daemon/pipewire-audio/wpasupplicant back the same
+# feature as their paired entry below and travel with it; they were never
+# part of the .deb's Suggests, only this file's) -------------------------
+
+# Populates the mDNS cache avahi-browse reads (paired with avahi-utils,
+# below). Absent: same as avahi-utils — discovery reports no sinks rather
+# than failing.
+avahi-daemon
+
+# `avahi-browse`: Chromecast/DIAL mDNS discovery. Absent: cast-targets and
+# targets report no Chromecast sinks (an empty list, not an error); AirPlay
+# and Miracast discovery are unaffected (separate mechanisms).
+avahi-utils
+
+# Outbound Chromecast/Miracast casting — the actual sender kast's
+# `open-display-cast`/`connect` shell out to. Absent: those verbs refuse
+# naming the fix (apt install gnome-network-displays); AirPlay-out and the
+# inbound receivers are unaffected.
 gnome-network-displays
 
-# Inbound AirPlay screen mirroring
+# `nmcli`: --drop-wifi's hold/release of the Wi-Fi link around a Miracast P2P
+# group, and reconnect-wifi. Absent: those verbs refuse naming the fix;
+# Miracast discovery just reports no P2P device (not an error); Chromecast
+# and AirPlay are unaffected. wpasupplicant (below) is NetworkManager's own
+# Wi-Fi backend and travels with it.
+network-manager
+
+# Provides pw-dump and the PipeWire session graph itself — paired with
+# pipewire-pulse, below, which is the piece kast's own verbs actually need.
+pipewire-audio
+
+# The PipeWire-provided PulseAudio shim shairport-sync's audio output
+# (-o pa) and the AirPlay-audio RAOP config route through. Absent:
+# shairport-sync reports its own output-backend failure; WirePlumber sink
+# selection (wpctl, kast's own verbs) is unaffected — separate package,
+# below.
+pipewire-pulse
+
+# Inbound AirPlay screen-mirroring receiver, off by default. Absent:
+# receiver-run and the systemd unit refuse naming the fix; nothing outbound
+# is affected.
 uxplay
 
-# Graphical pickers / dialogs (kast pick, AirPlay pairing PIN)
+# `wpctl`: local sink enumeration and selection (kast get-mode, select-sink).
+# Absent: those verbs refuse naming the fix; discovery and casting are
+# unaffected.
+wireplumber
+
+# NetworkManager's own Wi-Fi backend — travels with network-manager, above;
+# no kast verb calls it directly.
+wpasupplicant
+
+# The graphical pickers (kast pick, file-cast selection, AirPlay pairing PIN
+# dialog). Absent: those verbs refuse naming the fix; the Quick Settings tile
+# and every non-interactive verb are unaffected.
 zenity
 
-# This file is the CORE install only. Optional features pull heavier deps and
-# are installed on request (see install.sh flags), so a plain install stays lean:
+# gnome-shell is not installed by this file (assumed already present —
+# that's how you're running the Quick Settings tile in the first place; a
+# headless box doesn't want it). It's still in the .deb's Suggests, since a
+# bare Debian box has no such assumption to make.
+
+# This file is the CORE install (source/tarball path, install.sh). Optional
+# FEATURES beyond the core pull heavier deps on request (see install.sh
+# flags), so a plain install stays lean there too:
 #   --with-airplay-audio  -> shairport-sync          (AirPlay audio receive)
 #   --with-youtube        -> nodejs npm mpv yt-dlp    (YouTube DIAL receive)
 #   --with-all            -> both
-# AirPlay video-out + the control center use pyatv, installed isolated via pipx
-# (no apt packages) on every install when pipx is present.
+# AirPlay video-out + the control center use pyatv, installed isolated via
+# pipx (no apt packages) on every install when pipx is present.
 #
-# The UI is a GNOME Quick Settings extension (GJS, ships with gnome-shell) —
-# no extra packages needed.
-#
-# The .deb (from v0.7.5, packaging/deb/) is deliberately thinner: Depends:
-# python3 (kast-airplay) + jq (nearly every kast verb pipes through it) +
-# openssh-client (release-signature verify, runs on every install/update now
-# that kast is armed) only; everything else above is Recommends, same list
-# as this file's core install.
-# No new packages beyond what's already here — see docs/RELEASE-SIGNING.md's
-# ".deb" section and Makefile's `deb` target for the exact split. (Caught by
-# an isolated-container install test: without jq, `kast update` aborts
-# silently under set -e/pipefail before reaching any of its own logic.)
+# The .deb (packaging/deb/) is thinner than this file on purpose: Depends is
+# the family's hard floor (python3, systemd, openssh-client) plus kast's one
+# domain exemption (jq); everything above with a direct feature mapping is
+# Suggests, not Recommends — apt does not install a Suggests package by
+# default, so a bare `apt install kast.deb` pulls nothing beyond the four
+# hard packages, and every verb that needs an absent one says so. See
+# Makefile's `deb` target for the exact split and docs/RELEASE-SIGNING.md's
+# ".deb" section.
