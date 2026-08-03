@@ -31,7 +31,7 @@ jobs:
       # packaging/VERSION is the one version constant, read live at
       # runtime -- there is no per-file literal to check, and check-repo's
       # own rule enforces exactly the opposite of what check-version tests
-      # for (same convention as byebyte/RAMstein); and test_signing.sh is
+      # for (same convention as byebyte/ramstein); and test_signing.sh is
       # already covered by run-smoke -- `make smoke`'s own recipe runs it,
       # so run-signing-verify would run it a second time.
 
@@ -48,7 +48,7 @@ jobs:
       # one sutra-importing binary (kast-update, binding sutra_update, not
       # sutra -- see the Makefile's SUTRA_CHECK_MODULE/SUTRA_CHECK_BIN),
       # so this calls check-vendored-path directly rather than the
-      # SUTRA_CHECK_BINS + check-vendored-path-all loop RAMstein/byebyte
+      # SUTRA_CHECK_BINS + check-vendored-path-all loop ramstein/byebyte
       # need for their several sutra-importing binaries.
       - name: Vendored-path resolution (kast-update -> sutra_update)
         run: make check-vendored-path

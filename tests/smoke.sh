@@ -179,7 +179,7 @@ done
 # 2572) can still pass every check above: kast-update never crashes, install.sh
 # still names the right strings — the only thing that catches it is asking
 # where the import actually resolved. First-class check, not an inferred side
-# effect of the binary not crashing (alfred, msg 2572, citing RAMstein
+# effect of the binary not crashing (alfred, msg 2572, citing ramstein
 # b211651).
 if resolve_out="$(ROOT_DIR="${ROOT_DIR}" python3 - <<'PY' 2>&1
 import importlib.util
