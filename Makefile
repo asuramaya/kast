@@ -104,7 +104,17 @@ SHELLCHECK_EXCLUDES = SC2155,SC1090,SC1091
 check: check-sutra check-vendored-path
 	shellcheck -e $(SHELLCHECK_EXCLUDES) install.sh uninstall.sh src/bin/kast src/bin/kast-healthcheck packaging/release-signing/sync-signers.sh tests/smoke.sh tests/test_signing.sh
 	python3 -m py_compile src/bin/kast-airplay src/bin/kast-control-center src/bin/kast-update src/share/kast/lib/sutra_update.py
-	node --check "src/extension/kast@asuramaya/extension.js" "src/extension/kast@asuramaya/prefs.js"
+	# `node --check` on a .js path silently skips real parsing for any file
+	# with a top-level import -- every GNOME extension entry point is an ES
+	# module by construction, so the bare form has never actually validated
+	# these two (Alfred msg 3412, byebyte's own Makefile:26-29 precedent).
+	# Renaming to .mjs first makes node parse it as a real module.
+	set -e; for f in "src/extension/kast@asuramaya/extension.js" "src/extension/kast@asuramaya/prefs.js"; do \
+	    mjs=$$(mktemp --suffix=.mjs); \
+	    cp "$$f" "$$mjs"; \
+	    node --check "$$mjs"; \
+	    rm -f "$$mjs"; \
+	done
 	python3 -c "import json; json.load(open('src/extension/kast@asuramaya/metadata.json'))"
 	groff -t -k -man -Tutf8 -ww src/data/man/man1/kast.1 > /dev/null
 	@echo "all static checks passed"
@@ -205,7 +215,7 @@ deb:
 	  echo "Priority: optional"; \
 	  echo "Architecture: all"; \
 	  echo "Depends: python3, jq, systemd, openssh-client"; \
-	  echo "Suggests: gnome-shell, avahi-daemon, avahi-utils, gnome-network-displays, network-manager, pipewire-audio, pipewire-pulse, uxplay, wireplumber, wpasupplicant, zenity"; \
+	  echo "Suggests: avahi-daemon, avahi-utils, gnome-network-displays, network-manager, pipewire-audio, pipewire-pulse, uxplay, wireplumber, wpasupplicant, zenity"; \
 	  echo "Maintainer: asuramaya <asuramaya@users.noreply.github.com>"; \
 	  echo "Homepage: https://github.com/asuramaya/kast"; \
 	  echo "Description: Win+K-style cast panel for GNOME"; \
@@ -216,6 +226,13 @@ deb:
 	  echo " package to activate the pill on your account. Note: dpkg -r cleans"; \
 	  echo " /usr but per-user kast-pill copies survive in each account's home --"; \
 	  echo " run 'kast-pill remove' per account before purging."; \
+	  echo " ."; \
+	  echo " The Quick Settings tile needs GNOME Shell; kast-control-center and the"; \
+	  echo " kast CLI work the same without it. Not a Suggests: entry -- packaging/"; \
+	  echo " packages.txt can't carry it (install.sh apt-gets that file's optional"; \
+	  echo " tier unconditionally, so a gnome-shell line there would pull a full"; \
+	  echo " desktop onto every source install), and Suggests: is meant to be"; \
+	  echo " generated from exactly that file (ruling 2cd900ce)."; \
 	} > $(DEBROOT)/DEBIAN/control
 	mkdir -p build/deb
 	dpkg-deb --root-owner-group --build $(DEBROOT) $(DEBFILE)

@@ -132,11 +132,21 @@ if command -v dpkg-deb >/dev/null 2>&1; then
             for want in python3 jq systemd openssh-client; do
                 grep -q "${want}" <<<"${deb_depends}" || { bad "deb Depends missing ${want}"; dep_ok=0; }
             done
-            for want in gnome-shell avahi-daemon avahi-utils gnome-network-displays \
+            for want in avahi-daemon avahi-utils gnome-network-displays \
                         network-manager pipewire-audio pipewire-pulse uxplay \
                         wireplumber wpasupplicant zenity; do
                 grep -q "${want}" <<<"${deb_suggests}" || { bad "deb Suggests missing ${want}"; dep_ok=0; }
             done
+            # gnome-shell is deliberately NOT in Suggests: it has no packages.txt
+            # line (that file's optional tier gets apt-get installed unconditionally
+            # by install.sh, so a gnome-shell entry there would pull a full desktop
+            # onto every source install), and Suggests is meant to be generated from
+            # exactly that file with no exceptions (Tantra, ruling 2cd900ce). It's
+            # prose in the Description instead -- assert it stays there, not silently
+            # dropped from both.
+            deb_description="$(dpkg-deb -f "${DEBFILE}" Description)"
+            grep -qi "gnome-shell" <<<"${deb_suggests}" && { bad "deb Suggests has gnome-shell (should be prose-only, ruling 2cd900ce)"; dep_ok=0; }
+            grep -qi "GNOME Shell" <<<"${deb_description}" || { bad "deb Description lost its gnome-shell note"; dep_ok=0; }
             [[ -z "${deb_recommends}" ]] || { bad "deb still has a Recommends field (apt installs it by default): ${deb_recommends}"; dep_ok=0; }
             [[ "${dep_ok}" -eq 1 ]] && ok "deb Depends is the hard floor, everything else is Suggests (not Recommends)"
         else

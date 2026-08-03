@@ -57,5 +57,16 @@ jobs:
       # point: pill-ci.yml's has-extension step above checks exactly one JS
       # file (extension-js), so prefs.js -- the settings dialog -- needs
       # its own step here or it silently loses syntax checking on adoption.
+      #
+      # `node --check` on a .js path silently skips real parsing for any
+      # file with a top-level import -- prefs.js is an ES module by
+      # construction, so the bare form has never actually validated it
+      # (Alfred msg 3412). Renaming to .mjs first makes node parse it for
+      # real; pill-ci.yml's own has-extension step has the same defect for
+      # extension-js, tracked separately (Tantra, shared-workflow fix).
       - name: prefs.js (syntax)
-        run: node --check "src/extension/kast@asuramaya/prefs.js"
+        run: |
+          mjs=$(mktemp --suffix=.mjs)
+          cp "src/extension/kast@asuramaya/prefs.js" "$mjs"
+          node --check "$mjs"
+          rm -f "$mjs"

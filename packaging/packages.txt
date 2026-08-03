@@ -93,10 +93,14 @@ wpasupplicant
 # and every non-interactive verb are unaffected.
 zenity
 
-# gnome-shell is not installed by this file (assumed already present —
-# that's how you're running the Quick Settings tile in the first place; a
-# headless box doesn't want it). It's still in the .deb's Suggests, since a
-# bare Debian box has no such assumption to make.
+# gnome-shell has no entry here on purpose (assumed already present -- that's
+# how you're running the Quick Settings tile in the first place; a headless
+# box doesn't want it) and none in the .deb's Suggests either (Tantra, ruling
+# 2cd900ce): Suggests is meant to be generated from exactly this file with no
+# exceptions, and this file can't safely carry it -- install.sh apt-gets
+# every optional entry unconditionally, so a bare gnome-shell line would pull
+# a full desktop onto every source install. It's prose in the .deb's
+# Description instead. See Makefile's `deb` target for the exact wording.
 
 # This file is the CORE install (source/tarball path, install.sh). Optional
 # FEATURES beyond the core pull heavier deps on request (see install.sh
