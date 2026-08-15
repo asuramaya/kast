@@ -56,7 +56,17 @@ per-device bookkeeping, and Kast keeps none.
 **The seam is an optimisation, never a dependency.** `jq` missing, no runtime dir, a failed
 write: each of those returns quietly and leaves no file. The extension watches the path with a
 `Gio.FileMonitor` and falls back to shelling out when it isn't there. Nothing breaks when the
-snapshot is absent; the menu just goes back to being slow.
+snapshot is absent; the menu just goes back to being slow. This rule covers a fourth case too:
+`systemctl --user is-active` can fail to even ask (no user bus reachable), which is a different
+fact from a unit being confirmed inactive — the two used to collapse into the same "inactive"
+silently. `write_status_seam` now checks the actual word systemctl prints, not just its exit
+code, and skips the write entirely rather than persist a snapshot claiming a state nobody
+measured (family practice 2c45d78e: a control must be able to say "I don't know," rendered
+differently from a resolved negative). `kast status --json`'s own `receiver`/`audio_receiver`/
+`youtube_receiver` objects carry the same fact as an additive `active_unknown` boolean, so a
+script reading only `.active` still sees a safe `false` while one that checks `active_unknown`
+gets the honest reason. `kast-healthcheck` distinguishes it too: "cannot verify against
+systemd" is a different printed fact from "seam drifted from systemd," even though both exit 1.
 
 ## Where everything lives
 

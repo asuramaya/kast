@@ -75,12 +75,31 @@ expect_json  "targets --scan --json"   array "${KAST[@]}" targets --scan --json
 expect_json  "status --json is object" object "${KAST[@]}" status --json
 
 # --- status.json seam (docs/STATUS-SEAM.md): status is a listed by-product verb ---
+# THIS SANDBOX'S OWN ISOLATION MAKES SYSTEMD --USER UNREACHABLE HERE, always,
+# confirmed directly (not assumed): `systemctl --user is-active` fails to
+# connect once XDG_RUNTIME_DIR (overridden above, for this file's own
+# isolation) no longer points at the socket systemd actually created, and
+# that holds regardless of DBUS_SESSION_BUS_ADDRESS. Before the honesty fix,
+# that unreachability silently collapsed to a confident "inactive" and a
+# written seam -- this assertion passed for years on a lie it never noticed,
+# because "inactive" was also what a correct read would have said. Verified
+# live against the actual pre-fix code before trusting this replacement: it
+# reports {"active": false} with no distinguishing field at all, and it
+# writes the seam anyway, under this exact sandboxed environment.
+out="$("${KAST[@]}" status --json)"
+if echo "${out}" | jq -e '.receiver.active_unknown == true and .receiver.active == false' >/dev/null 2>&1; then
+    ok "status: systemd-unreachable state reports unknown honestly (active_unknown), not a fabricated inactive"
+else
+    bad "status --json didn't report active_unknown under an unreachable systemd bus: ${out}"
+fi
 SEAM_FILE="${XDG_RUNTIME_DIR}/kast/status.json"
-if [[ -f "${SEAM_FILE}" ]] && jq -e '
+if [[ ! -f "${SEAM_FILE}" ]]; then
+    ok "status.json seam: correctly skipped writing rather than fabricate a snapshot (systemd unreachable in this sandbox)"
+elif jq -e '
         .version == 1 and (.written_at | type) == "number"
-        and (.receivers.airplay_screen | IN("active","inactive"))
-        and (.receivers.airplay_audio  | IN("active","inactive"))
-        and (.receivers.youtube        | IN("active","inactive"))
+        and (.receivers.airplay_screen | IN("active","inactive","unknown"))
+        and (.receivers.airplay_audio  | IN("active","inactive","unknown"))
+        and (.receivers.youtube        | IN("active","inactive","unknown"))
         and (.devices | type) == "array"
         and (.session == null or .session.active == true)
     ' "${SEAM_FILE}" >/dev/null 2>&1

@@ -67,6 +67,25 @@ die() {
     exit 1
 }
 
+unit_state() {
+    # `systemctl --user is-active --quiet X && echo active || echo inactive`
+    # cannot tell "the unit is genuinely inactive" from "systemctl couldn't
+    # even ask" (no user bus, DBUS unreachable) -- both collapse to the same
+    # branch, silently. Confirmed empirically: a bus-unreachable call prints
+    # NOTHING to stdout (the error goes to stderr) and exits non-zero, same
+    # shape as `is-active` on a real, cleanly-inactive unit under --quiet.
+    # Read the actual word systemctl prints instead of just its exit code --
+    # a real state word means it could ask and got an answer; anything else
+    # (empty, or an unrecognized string) means it couldn't, and that must
+    # stay distinct from "inactive" rather than being reported as one.
+    local out
+    out="$(systemctl --user is-active "$1" 2>/dev/null)" || true
+    case "${out}" in
+        active|inactive|failed|activating|deactivating|reloading|unknown) printf '%s' "${out}" ;;
+        *) printf 'unknown' ;;
+    esac
+}
+
 need() {
     # $2 names the apt package when it differs from the command name (e.g.
     # `need wpctl wireplumber`) -- family dependency standard (operator
@@ -270,29 +289,34 @@ status_json() {
 
     local receiver_active="false"
     local receiver_enabled="false"
+    local receiver_state_unknown="false"
     local display_installed="false"
     local uxplay_installed="false"
     local audio_active="false"
+    local audio_state_unknown="false"
     local audio_installed="false"
     local sinks_json="[]"
     local maybe_sinks
 
-    if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then
-        receiver_active="true"
-    fi
+    case "$(unit_state uxplay.service)" in
+        active)  receiver_active="true" ;;
+        unknown) receiver_state_unknown="true" ;;
+    esac
     if systemctl --user is-enabled --quiet uxplay.service 2>/dev/null; then
         receiver_enabled="true"
     fi
-    if systemctl --user is-active --quiet shairport-sync.service 2>/dev/null; then
-        audio_active="true"
-    fi
+    case "$(unit_state shairport-sync.service)" in
+        active)  audio_active="true" ;;
+        unknown) audio_state_unknown="true" ;;
+    esac
     if command -v shairport-sync >/dev/null 2>&1; then
         audio_installed="true"
     fi
-    local yt_active="false" yt_installed="false" yt_reason=""
-    if systemctl --user is-active --quiet kast-youtube.service 2>/dev/null; then
-        yt_active="true"
-    fi
+    local yt_active="false" yt_state_unknown="false" yt_installed="false" yt_reason=""
+    case "$(unit_state kast-youtube.service)" in
+        active)  yt_active="true" ;;
+        unknown) yt_state_unknown="true" ;;
+    esac
     if [[ -f "${DATA_HOME}/${APP_ID}/youtube-receiver/index.mjs" ]]; then
         # The app ships with every install; node + mpv are the opt-in apt deps.
         # When one is missing the receiver can't run, so report exactly what's
@@ -329,14 +353,17 @@ status_json() {
         --arg version "${KAST_VERSION}" \
         --arg receiver_name "${UXPLAY_NAME}" \
         --arg receiver_active "${receiver_active}" \
+        --arg receiver_unknown "${receiver_state_unknown}" \
         --arg receiver_enabled "${receiver_enabled}" \
         --arg display_installed "${display_installed}" \
         --arg uxplay_installed "${uxplay_installed}" \
         --arg audio_name "${SHAIRPORT_NAME:-Kast Audio}" \
         --arg audio_active "${audio_active}" \
+        --arg audio_unknown "${audio_state_unknown}" \
         --arg audio_installed "${audio_installed}" \
         --arg yt_name "${YT_RECEIVER_NAME:-Kast YouTube}" \
         --arg yt_active "${yt_active}" \
+        --arg yt_unknown "${yt_state_unknown}" \
         --arg yt_installed "${yt_installed}" \
         --arg yt_reason "${yt_reason}" \
         --arg catt_installed "$(have_catt && printf true || printf false)" \
@@ -348,17 +375,20 @@ status_json() {
             receiver: {
                 name: $receiver_name,
                 active: ($receiver_active == "true"),
+                active_unknown: ($receiver_unknown == "true"),
                 enabled: ($receiver_enabled == "true"),
                 installed: ($uxplay_installed == "true")
             },
             audio_receiver: {
                 name: $audio_name,
                 active: ($audio_active == "true"),
+                active_unknown: ($audio_unknown == "true"),
                 installed: ($audio_installed == "true")
             },
             youtube_receiver: {
                 name: $yt_name,
                 active: ($yt_active == "true"),
+                active_unknown: ($yt_unknown == "true"),
                 installed: ($yt_installed == "true"),
                 reason: (if $yt_reason == "" then null else $yt_reason end)
             },
@@ -375,8 +405,14 @@ status_json() {
 }
 
 status_text() {
+    # active_unknown is additive to the JSON (existing consumers reading only
+    # .receiver.active still see a safe `false`); rendered here so a human
+    # reading the CLI directly gets the same "systemd didn't answer" fact a
+    # script would otherwise only find by checking the extra field.
     status_json | jq -r '
-        "Receiver: \(.receiver.name) [" + (if .receiver.active then "active" else "inactive" end) + "]",
+        "Receiver: \(.receiver.name) [" +
+            (if .receiver.active_unknown then "unknown -- systemd --user did not answer"
+             elif .receiver.active then "active" else "inactive" end) + "]",
         "Display casting app installed: \(.outbound.display_cast_installed)",
         "AirPlay sinks discovered: \(.outbound.airplay_sink_count)",
         "Mirror mode: \(.mirror_mode)"
@@ -990,10 +1026,14 @@ gnd_disconnect() {
 
 cast_state_json() {
     # Active outbound display stream, if any. The unit is a transient systemd
-    # user unit, so its liveness is the source of truth; a missing/dead unit
-    # means the stream ended (clean up the stale marker).
+    # user unit, so its liveness is the source of truth; a CONFIRMED dead
+    # unit means the stream ended (clean up the stale marker) -- but
+    # "systemd didn't answer" is not confirmation of anything. Deleting the
+    # marker on an unknown read would be a silent, wrong, and irreversible
+    # guess: the next successful read could have recovered a genuinely-live
+    # session's tracking, and this would have thrown it away instead.
     need jq
-    local active="false" unit="" target="" since="" line rest
+    local active="false" unit="" target="" since="" line rest state
     if [[ -f "${GND_STREAM_FILE}" ]]; then
         line="$(<"${GND_STREAM_FILE}")"
         unit="${line%%$'\t'*}"
@@ -1003,11 +1043,18 @@ cast_state_json() {
         since="${rest#*$'\t'}"
         [[ "${since}" == "${rest}" ]] && since=""
         [[ "${target}" == "${unit}" ]] && target=""
-        if [[ -n "${unit}" ]] && systemctl --user is-active --quiet "${unit}" 2>/dev/null; then
-            active="true"
-        else
-            rm -f "${GND_STREAM_FILE}"
-            unit=""; target=""; since=""
+        if [[ -n "${unit}" ]]; then
+            state="$(unit_state "${unit}")"
+            if [[ "${state}" == "active" ]]; then
+                active="true"
+            elif [[ "${state}" != "unknown" ]]; then
+                rm -f "${GND_STREAM_FILE}"
+                unit=""; target=""; since=""
+            fi
+            # else: unknown -- leave the marker and the reported fields as
+            # they are; a caller that needs a strict bool sees "false" here
+            # (session.active in the seam), which is the SAFE default when
+            # this whole seam write gets skipped for the same reason, below.
         fi
     fi
     jq -n --argjson active "${active}" --arg unit "${unit}" --arg target "${target}" --arg since "${since}" \
@@ -1026,11 +1073,25 @@ write_status_seam() {
     command -v jq >/dev/null 2>&1 || return 0
     ensure_runtime_dir || return 0
 
-    local now receiver_active="false" audio_active="false" yt_active="false" devices cast tmp
+    local now receiver_state audio_state yt_state receiver_active="false" audio_active="false" yt_active="false" devices cast tmp
     now="$(date +%s)"
-    systemctl --user is-active --quiet uxplay.service 2>/dev/null && receiver_active="true"
-    systemctl --user is-active --quiet shairport-sync.service 2>/dev/null && audio_active="true"
-    systemctl --user is-active --quiet kast-youtube.service 2>/dev/null && yt_active="true"
+    receiver_state="$(unit_state uxplay.service)"
+    audio_state="$(unit_state shairport-sync.service)"
+    yt_state="$(unit_state kast-youtube.service)"
+    if [[ "${receiver_state}" == "unknown" || "${audio_state}" == "unknown" || "${yt_state}" == "unknown" ]]; then
+        # Can't honestly report receiver state right now (systemd unreachable
+        # this call) -- the seam is an optimisation, never a dependency
+        # (docs/ARCHITECTURE.md's own three rules for it): writing a snapshot
+        # that CLAIMS a state nobody actually measured would be worse than
+        # writing none. Leave any existing file exactly as it is; the
+        # extension already falls back to a live re-derivation when the seam
+        # is stale or absent, which is precisely what "we don't know" means
+        # here -- go find out fresh rather than trust a guess.
+        return 0
+    fi
+    [[ "${receiver_state}" == "active" ]] && receiver_active="true"
+    [[ "${audio_state}" == "active" ]] && audio_active="true"
+    [[ "${yt_state}" == "active" ]] && yt_active="true"
 
     # Devices: the cached avahi read (no active scan — this must stay cheap,
     # it runs as a by-product of ordinary verbs). discovered_at is stamped
@@ -1571,9 +1632,17 @@ doctor_run() {
 
     printf '\nReceivers (inbound, off by default)\n'
     if have uxplay; then mark ok "uxplay installed (AirPlay screen mirroring in)"; else mark warn "uxplay not installed" "apt install uxplay for AirPlay screen mirroring"; fi
-    if systemctl --user is-active --quiet uxplay.service 2>/dev/null; then mark ok "AirPlay video receiver running (PIN-gated)"; else mark ok "AirPlay video receiver off (enable from the Kast tile)"; fi
+    case "$(unit_state uxplay.service)" in
+        active)  mark ok "AirPlay video receiver running (PIN-gated)" ;;
+        unknown) mark warn "AirPlay video receiver state unknown" "systemd --user did not answer; can't tell running from off" ;;
+        *)       mark ok "AirPlay video receiver off (enable from the Kast tile)" ;;
+    esac
     if have shairport-sync; then mark ok "shairport-sync installed (AirPlay audio in)"; else mark warn "shairport-sync not installed" "apt install shairport-sync for AirPlay audio in"; fi
-    if systemctl --user is-active --quiet shairport-sync.service 2>/dev/null; then mark ok "AirPlay audio receiver running"; else mark ok "AirPlay audio receiver off (enable from the Kast tile)"; fi
+    case "$(unit_state shairport-sync.service)" in
+        active)  mark ok "AirPlay audio receiver running" ;;
+        unknown) mark warn "AirPlay audio receiver state unknown" "systemd --user did not answer; can't tell running from off" ;;
+        *)       mark ok "AirPlay audio receiver off (enable from the Kast tile)" ;;
+    esac
     if [[ -f "${YT_RECEIVER_DIR}/index.mjs" ]] && find_node >/dev/null 2>&1 && have mpv; then
         mark ok "YouTube DIAL receiver ready (node + mpv)"
         if [[ -x "${YT_DLP_BIN}" ]]; then
@@ -1588,7 +1657,11 @@ doctor_run() {
     else
         mark warn "YouTube receiver not installed" "re-run ./install.sh with node + npm present"
     fi
-    if systemctl --user is-active --quiet kast-youtube.service 2>/dev/null; then mark ok "YouTube receiver running"; else mark ok "YouTube receiver off (enable from the Kast tile)"; fi
+    case "$(unit_state kast-youtube.service)" in
+        active)  mark ok "YouTube receiver running" ;;
+        unknown) mark warn "YouTube receiver state unknown" "systemd --user did not answer; can't tell running from off" ;;
+        *)       mark ok "YouTube receiver off (enable from the Kast tile)" ;;
+    esac
 
     printf '\nOutbound display cast\n'
     if have gnome-network-displays; then mark ok "gnome-network-displays installed"; else mark warn "gnome-network-displays missing" "Chromecast/Miracast casting off; apt install gnome-network-displays"; fi

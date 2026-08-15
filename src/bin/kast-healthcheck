@@ -52,7 +52,22 @@ if [[ -f "${_sutra_version}" && -f "${_sutra_py}" ]]; then
 fi
 
 live_state() {
-    systemctl --user is-active --quiet "$1" 2>/dev/null && printf 'active' || printf 'inactive'
+    # `is-active --quiet ... && active || inactive` cannot tell "genuinely
+    # inactive" from "systemd --user didn't answer" (no bus, no session) --
+    # both take the same branch. A bus-unreachable call prints nothing to
+    # stdout (confirmed empirically: the error goes to stderr) and exits
+    # non-zero, the same shape --quiet reports for a real, cleanly-inactive
+    # unit. Read the actual word instead of just the exit code: a real state
+    # word means systemd could answer; anything else means it couldn't, and
+    # that has to stay a distinct fact from "inactive" rather than being
+    # reported as one -- this whole tool exists to catch a drifted claim,
+    # and "I couldn't check" reported as "inactive" would be exactly that.
+    local out
+    out="$(systemctl --user is-active "$1" 2>/dev/null)" || true
+    case "${out}" in
+        active|inactive|failed|activating|deactivating|reloading|unknown) printf '%s' "${out}" ;;
+        *) printf 'unknown' ;;
+    esac
 }
 
 if [[ ! -f "${SEAM_FILE}" ]]; then
@@ -65,16 +80,25 @@ jq -e '.version == 1 and has("receivers") and has("devices") and has("session")'
     || fail "${SEAM_FILE} malformed (unexpected shape)"
 
 drift=""
+cannot_verify=""
 for pair in "uxplay.service airplay_screen" "shairport-sync.service airplay_audio" "kast-youtube.service youtube"; do
     unit="${pair%% *}"
     key="${pair#* }"
     seam_state="$(jq -r --arg k "${key}" '.receivers[$k] // "unknown"' <<<"${seam}")"
     live="$(live_state "${unit}")"
+    if [[ "${live}" == "unknown" ]]; then
+        # NOT drift -- a resolved disagreement and "systemd didn't answer"
+        # are different facts, and this line exists to keep them different
+        # rather than let the loop below fold them into the same verdict.
+        cannot_verify="${key} (systemd --user did not answer for ${unit})"
+        break
+    fi
     if [[ "${seam_state}" != "${live}" ]]; then
         drift="${key} says ${seam_state}, systemd says ${live}"
         break
     fi
 done
+[[ -z "${cannot_verify}" ]] || fail "cannot verify against systemd (${cannot_verify}) — not a confirmed drift, systemd itself did not answer; retry once the user bus is reachable"
 [[ -z "${drift}" ]] || fail "seam drifted from systemd (${drift}) — re-run any kast verb to refresh"
 
 age=$(( $(date +%s) - $(jq -r '.written_at // 0' <<<"${seam}") ))
