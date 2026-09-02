@@ -239,6 +239,19 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+# kast installs per-user (BIN_DIR/CONFIG_HOME/DATA_HOME are all under $HOME)
+# and escalates internally for the one step that needs it (disabling the
+# system shairport-sync unit, below). Running the whole script under sudo
+# does not fail loudly — it writes a complete-looking install into root's
+# own $HOME and only dies later at `systemctl --user daemon-reload`, because
+# root has no session bus. That leaves a real, partial install sitting where
+# nobody looks while the user-visible result reads as "install failed" —
+# refuse up front instead.
+if [[ "${EUID}" -eq 0 ]]; then
+    printf 'kast installs per-user — do not run install.sh with sudo.\nRun it as yourself; it will sudo internally for the one step that needs it.\n' >&2
+    exit 1
+fi
+
 install_packages() {
     # Strip CRLF so a Windows-checkout packages.txt doesn't yield names with a
     # trailing \r that apt then can't resolve.
