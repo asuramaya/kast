@@ -29,14 +29,49 @@
 # adoption are fixed below; each is called out at its own site rather than
 # only here, since "what changed" matters less than "why the first cut
 # missed it."
+#
+# PROVENANCE (msg 3744 via Alfred): what the two lines below do NOT do,
+# stated plainly rather than left for a reader to infer more coverage than
+# exists. This whole recipe, provenance included, only ever RUNS where a
+# canonical sutra checkout sits beside the pill (`$(_SUTRA_CANON)`) -- a
+# developer's own machine, or CI that explicitly checks canonical out
+# alongside the pill. It protects the VENDORING ACT: was the commit that
+# got copied into this pill actually approved by a human holding the
+# signing key, at vendor time or since. It says NOTHING about the end
+# user installing a .deb -- that path never runs this recipe at all, and
+# relies entirely on the PILL's own release signature, which is the
+# user-facing control and lives one layer downstream of this one. This
+# closes the gap upstream of that signature, not a replacement for it.
 
 _SUTRA_MK_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 _SUTRA_CANON := $(HOME)/code/REPOS/sutra
 
-# --- check-sutra: integrity (hard gate) + freshness (LAG/DRIFT) -----------
+# --- check-sutra: integrity (hard gate) + freshness (LAG/DRIFT) + ----------
+# --- provenance (UNKNOWN/warn, never a failure) ----------------------------
 #
 # Integrity: the vendored file's sha256 against its own .version anchor --
 # hand-edited or corrupted, always a hard fail, no nuance.
+#
+# Provenance: two independent signals, neither ever fails the build --
+# graduated UNKNOWN/warn/ok, same shape as freshness's LAG/DRIFT, because a
+# missing signature is a fact worth surfacing, not grounds to block a
+# developer's `make check`. (1) The vendored .commit anchor's own second
+# line: vendor.sh writes "unsigned" there when it vendored with
+# SUTRA_VENDOR_ALLOW_UNSIGNED=1 -- a static, offline fact, needs no
+# canonical checkout, checked and reported unconditionally below. (2) A
+# LIVE check, gated exactly like freshness (`$$canon/.git` present): is the
+# recorded commit reachable from a tag that verifies against canonical's
+# OWN packaging/release-signing/allowed_signers, right now? This can say
+# "ok" even for a commit vendored unsigned at the time, if canonical was
+# tagged and signed LATER covering it -- a retroactive human endorsement is
+# real signal, not staleness. An unarmed canonical anchor (empty or
+# missing) reads as provenance unknown, not a warning: there is nothing to
+# check against yet, same armed/unarmed doctrine as sutra_update.py's own
+# armed(). Missing ssh-keygen ALSO reads as unknown, never as "not
+# reachable" (msg 4573 via Alfred: a monitor must not report a confident
+# NO when the truth is COULDN'T-TELL -- verify-tag with gpg.format=ssh
+# shells out to ssh-keygen, and a machine without it would otherwise see
+# every genuinely-signed tag fail identically to an actually-unsigned one).
 #
 # Freshness: the .commit anchor compared against canonical sutra's history
 # for THAT FILE SPECIFICALLY -- `git -C "$canon" log -1 --format=%H --
@@ -98,11 +133,19 @@ check-sutra:
 	        return 1; \
 	    fi; \
 	    echo "check-sutra: integrity ok ($$label $$v, sha256 $$sha)"; \
+	    recorded=""; \
+	    if [ -f "$$cmt" ]; then \
+	        recorded=$$(sed -n '1p' "$$cmt"); \
+	        if [ "$$(sed -n '2p' "$$cmt")" = "unsigned" ]; then \
+	            echo "check-sutra: provenance WARN ($$label vendored with" \
+	                 "SUTRA_VENDOR_ALLOW_UNSIGNED=1 -- canonical HEAD had no" \
+	                 "signed tag covering it at vendor time)"; \
+	        fi; \
+	    fi; \
 	    if [ -d "$$canon/.git" ]; then \
-	        if [ ! -f "$$cmt" ]; then \
+	        if [ -z "$$recorded" ]; then \
 	            echo "check-sutra: freshness unknown for $$label (no $$cmt anchor, an older vendor)"; \
 	        else \
-	            recorded=$$(cat "$$cmt"); \
 	            filehead=$$(git -C "$$canon" log -1 --format=%H -- "$$canon_relpath"); \
 	            if git -C "$$canon" merge-base --is-ancestor "$$filehead" "$$recorded" 2>/dev/null; then \
 	                echo "check-sutra: freshness ok ($$label vendored from $$recorded, at or after its own head $$filehead)"; \
@@ -111,6 +154,27 @@ check-sutra:
 	            else \
 	                echo "check-sutra FAIL: DRIFT ($$label's vendored commit $$recorded is not in canonical's history at $$canon) -- re-vendor"; \
 	                return 1; \
+	            fi; \
+	            canon_anchor="$$canon/packaging/release-signing/allowed_signers"; \
+	            if [ ! -s "$$canon_anchor" ]; then \
+	                echo "check-sutra: provenance unknown ($$label -- canonical signing anchor not armed yet)"; \
+	            elif ! command -v ssh-keygen >/dev/null 2>&1; then \
+	                echo "check-sutra: provenance unknown ($$label -- ssh-keygen not available," \
+	                     "cannot verify any signature; not the same as unreachable)"; \
+	            else \
+	                ptag=""; \
+	                for t in $$(git -C "$$canon" tag --contains "$$recorded" 2>/dev/null); do \
+	                    if git -C "$$canon" -c gpg.format=ssh -c gpg.ssh.allowedSignersFile="$$canon_anchor" \
+	                           verify-tag "$$t" >/dev/null 2>&1; then \
+	                        ptag="$$t"; break; \
+	                    fi; \
+	                done; \
+	                if [ -n "$$ptag" ]; then \
+	                    echo "check-sutra: provenance ok ($$label -- signed tag $$ptag)"; \
+	                else \
+	                    echo "check-sutra: provenance WARN ($$label -- recorded commit" \
+	                         "$$recorded not reachable from any signed tag in canonical's history)"; \
+	                fi; \
 	            fi; \
 	        fi; \
 	    fi; \
